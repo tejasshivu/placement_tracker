@@ -331,6 +331,85 @@ textarea {
   color: var(--accent);
 }
 
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.8rem 0 1.2rem;
+}
+
+.stat-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.stat-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.stat-value {
+  margin: 0.2rem 0 0;
+  font-family: "Fraunces", serif;
+  font-size: 1.8rem;
+  line-height: 1.1;
+}
+
+.report-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.list.compact {
+  margin-top: 0.4rem;
+}
+
+.list.compact .item {
+  padding: 0.55rem 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin: 0.5rem 0 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.report-table th,
+.report-table td {
+  text-align: left;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.report-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 860px) {
+  .stat-grid,
+  .report-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .grid-form {
     grid-template-columns: 1fr;
