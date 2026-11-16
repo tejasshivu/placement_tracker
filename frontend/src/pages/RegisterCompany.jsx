@@ -30,42 +30,51 @@ export default function RegisterCompany() {
   };
 
   return (
-    <div className="auth-card">
-      <h2>Company registration</h2>
-      <form onSubmit={onSubmit}>
-        <label>
-          Company name
-          <input value={form.company_name} onChange={update("company_name")} required />
-        </label>
-        <label>
-          Email
-          <input value={form.email} onChange={update("email")} type="email" required />
-        </label>
-        <label>
-          Password
-          <input value={form.password} onChange={update("password")} type="password" required />
-        </label>
-        <label>
-          Website
-          <input value={form.website} onChange={update("website")} />
-        </label>
-        <label>
-          HR contact
-          <input value={form.hr_contact} onChange={update("hr_contact")} />
-        </label>
-        <label>
-          Description
-          <textarea value={form.description} onChange={update("description")} rows={3} />
-        </label>
-        {error && <p className="error">{error}</p>}
-        {message && <p className="ok">{message}</p>}
-        <button className="btn primary" type="submit">
-          Request access
-        </button>
-      </form>
-      <p className="muted">
-        Already registered? <Link to="/login">Log in</Link>
-      </p>
+    <div className="login-stage">
+      <section className="login-panel brand-panel">
+        <p className="login-kicker">CampusHire</p>
+        <h1>Hire from campus</h1>
+        <p>Request access, propose drives, and manage applicants with the placement team.</p>
+      </section>
+
+      <section className="login-panel form-panel">
+        <h2>Company registration</h2>
+        <p className="muted">Placement approval is required before posting drives.</p>
+        <form onSubmit={onSubmit} className="login-form">
+          <label>
+            Company name
+            <input value={form.company_name} onChange={update("company_name")} required />
+          </label>
+          <label>
+            Email
+            <input value={form.email} onChange={update("email")} type="email" required />
+          </label>
+          <label>
+            Password
+            <input value={form.password} onChange={update("password")} type="password" required />
+          </label>
+          <label>
+            Website
+            <input value={form.website} onChange={update("website")} />
+          </label>
+          <label>
+            HR contact
+            <input value={form.hr_contact} onChange={update("hr_contact")} />
+          </label>
+          <label>
+            Description
+            <textarea value={form.description} onChange={update("description")} rows={3} />
+          </label>
+          {error && <p className="error">{error}</p>}
+          {message && <p className="ok">{message}</p>}
+          <button className="btn primary wide" type="submit">
+            Request access
+          </button>
+        </form>
+        <p className="muted">
+          Already registered? <Link to="/login">Log in</Link>
+        </p>
+      </section>
     </div>
   );
 }

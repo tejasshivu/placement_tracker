@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import api from "../api";
 import { useAuth } from "../AuthContext";
-import { downloadResume } from "../downloadResume";
+import { downloadPdf, downloadResume } from "../downloadResume";
+import DashboardTabs from "../components/DashboardTabs";
 
 export default function StudentDashboard() {
   const { user, setUser } = useAuth();
+  const [tab, setTab] = useState("overview");
   const [drives, setDrives] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
   const [profile, setProfile] = useState({
     full_name: "",
     branch: "",
@@ -21,13 +24,15 @@ export default function StudentDashboard() {
   const [error, setError] = useState("");
 
   const load = async () => {
-    const [d, a, me] = await Promise.all([
+    const [d, a, me, notices] = await Promise.all([
       api.get("/drives"),
       api.get("/applications/mine"),
       api.get("/auth/me"),
+      api.get("/placement/announcements"),
     ]);
     setDrives(d.data);
     setApplications(a.data);
+    setAnnouncements(notices.data);
     setUser(me.data);
     if (me.data.profile) {
       setProfile({
@@ -109,122 +114,233 @@ export default function StudentDashboard() {
       await api.post("/applications", { drive_id: driveId });
       setMessage("Applied successfully");
       await load();
+      setTab("applications");
     } catch (err) {
       setError(err.response?.data?.error || "Apply failed");
     }
   };
 
   const appliedIds = new Set(applications.map((a) => a.drive_id));
+  const tabs = [
+    { id: "overview", label: "Overview", count: announcements.length },
+    { id: "drives", label: "Drives", count: drives.length },
+    { id: "applications", label: "Applications", count: applications.length },
+    { id: "profile", label: "Profile" },
+  ];
 
   return (
-    <div className="dashboard">
-      <h2>Student dashboard</h2>
-      <p className="muted">Signed in as {user?.email}</p>
-      {message && <p className="ok">{message}</p>}
-      {error && <p className="error">{error}</p>}
-
-      <h3>My profile</h3>
-      <form className="grid-form" onSubmit={saveProfile}>
-        <label>
-          Full name
-          <input value={profile.full_name} onChange={updateField("full_name")} required />
-        </label>
-        <label>
-          Branch
-          <input value={profile.branch} onChange={updateField("branch")} placeholder="CSE" />
-        </label>
-        <label>
-          Year
-          <input value={profile.year} onChange={updateField("year")} type="number" />
-        </label>
-        <label>
-          CGPA
-          <input value={profile.cgpa} onChange={updateField("cgpa")} type="number" step="0.01" />
-        </label>
-        <label className="full">
-          Phone
-          <input value={profile.phone} onChange={updateField("phone")} />
-        </label>
-        <button className="btn primary" type="submit">
-          Save profile
-        </button>
-      </form>
-
-      <h3>Resume (PDF only, max 5 MB)</h3>
-      <p className="muted">
-        {profile.has_resume
-          ? `Uploaded: ${profile.resume_original_name || "resume.pdf"}`
-          : "No resume uploaded yet. Required before applying."}
-      </p>
-      <form className="grid-form" onSubmit={uploadResume}>
-        <label className="full">
-          Choose PDF
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
-          />
-        </label>
-        <div className="cta-row">
-          <button className="btn primary" type="submit">
-            Upload resume
-          </button>
-          {profile.has_resume && (
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() =>
-                downloadResume(
-                  "/students/me/resume",
-                  profile.resume_original_name || "resume.pdf"
-                ).catch(() => setError("Could not download resume"))
-              }
-            >
-              Download my resume
-            </button>
-          )}
+    <div className="dashboard dash-shell">
+      <header className="dash-header">
+        <div>
+          <p className="dash-eyebrow">Student workspace</p>
+          <h2>Hello{profile.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}</h2>
+          <p className="muted">Signed in as {user?.email}</p>
         </div>
-      </form>
+        <div className="dash-quick-stats">
+          <div className="mini-stat">
+            <span>Drives</span>
+            <strong>{drives.length}</strong>
+          </div>
+          <div className="mini-stat">
+            <span>Applied</span>
+            <strong>{applications.length}</strong>
+          </div>
+          <div className="mini-stat">
+            <span>Resume</span>
+            <strong>{profile.has_resume ? "Ready" : "Missing"}</strong>
+          </div>
+        </div>
+      </header>
 
-      <h3>Upcoming drives</h3>
-      <div className="list">
-        {drives.map((drive) => (
-          <article key={drive.id} className="item">
-            <div>
-              <strong>{drive.title}</strong>
-              <p>
-                {drive.company_name} · {drive.role || "Role TBA"} ·{" "}
-                {drive.package_lpa ? `${drive.package_lpa} LPA` : "Package TBA"}
-              </p>
-              <p className="muted">
-                Drive: {drive.drive_date || "TBA"} · Min CGPA: {drive.min_cgpa ?? "-"} · Branches:{" "}
-                {drive.eligible_branches || "All"}
-              </p>
-            </div>
-            <button
-              className="btn primary"
-              disabled={appliedIds.has(drive.id)}
-              onClick={() => apply(drive.id)}
-            >
-              {appliedIds.has(drive.id) ? "Applied" : "Apply"}
-            </button>
-          </article>
-        ))}
-        {!drives.length && <p className="muted">No drives yet.</p>}
-      </div>
+      {(message || error) && (
+        <div className={`toast-banner ${error ? "is-error" : "is-ok"}`}>
+          {error || message}
+        </div>
+      )}
 
-      <h3>My applications</h3>
-      <div className="list">
-        {applications.map((app) => (
-          <article key={app.id} className="item">
-            <div>
-              <strong>{app.drive?.title}</strong>
-              <p className="muted">Status: {app.status}</p>
+      <DashboardTabs tabs={tabs} active={tab} onChange={setTab} />
+
+      <section className="tab-panel" key={tab}>
+        {tab === "overview" && (
+          <>
+            <div className="panel-head">
+              <h3>Announcements</h3>
+              <p className="muted">Latest notes from the placement team</p>
             </div>
-          </article>
-        ))}
-        {!applications.length && <p className="muted">No applications yet.</p>}
-      </div>
+            <div className="card-list">
+              {announcements.map((notice) => (
+                <article key={notice.id} className="soft-card">
+                  <strong>{notice.title}</strong>
+                  <p>{notice.body}</p>
+                  <p className="muted">
+                    {notice.created_at ? new Date(notice.created_at).toLocaleString() : ""}
+                  </p>
+                </article>
+              ))}
+              {!announcements.length && (
+                <p className="muted empty-note">No announcements yet.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {tab === "drives" && (
+          <>
+            <div className="panel-head">
+              <h3>Upcoming drives</h3>
+              <p className="muted">Browse and apply to open opportunities</p>
+            </div>
+            <div className="card-list">
+              {drives.map((drive) => (
+                <article key={drive.id} className="soft-card row-card">
+                  <div>
+                    <strong>{drive.title}</strong>
+                    <p>
+                      {drive.company_name} · {drive.role || "Role TBA"} ·{" "}
+                      {drive.package_lpa ? `${drive.package_lpa} LPA` : "Package TBA"}
+                    </p>
+                    <p className="muted">
+                      Drive: {drive.drive_date || "TBA"} · Min CGPA: {drive.min_cgpa ?? "-"} ·
+                      Branches: {drive.eligible_branches || "All"}
+                    </p>
+                  </div>
+                  <button
+                    className="btn primary"
+                    disabled={appliedIds.has(drive.id)}
+                    onClick={() => apply(drive.id)}
+                  >
+                    {appliedIds.has(drive.id) ? "Applied" : "Apply"}
+                  </button>
+                </article>
+              ))}
+              {!drives.length && <p className="muted empty-note">No drives yet.</p>}
+            </div>
+          </>
+        )}
+
+        {tab === "applications" && (
+          <>
+            <div className="panel-head">
+              <h3>My applications</h3>
+              <p className="muted">Track status and download offer letters when selected</p>
+            </div>
+            <div className="card-list">
+              {applications.map((app) => (
+                <article key={app.id} className="soft-card">
+                  <div className="row-card" style={{ padding: 0, border: "none" }}>
+                    <div>
+                      <strong>{app.drive?.title}</strong>
+                      <p className="muted">{app.drive?.company_name || "Company"}</p>
+                    </div>
+                    <span className={`status-pill status-${app.status}`}>{app.status}</span>
+                  </div>
+                  {app.status === "selected" && (
+                    <div className="cta-row" style={{ marginTop: "0.8rem" }}>
+                      {app.has_offer_letter ? (
+                        <button
+                          className="btn primary"
+                          type="button"
+                          onClick={() =>
+                            downloadPdf(
+                              `/applications/${app.id}/offer`,
+                              app.offer_original_name || "offer_letter.pdf"
+                            ).catch(() => setError("Could not download offer letter"))
+                          }
+                        >
+                          Download offer letter
+                        </button>
+                      ) : (
+                        <p className="muted">Selected — offer letter not uploaded yet.</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+              {!applications.length && (
+                <p className="muted empty-note">No applications yet.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {tab === "profile" && (
+          <>
+            <div className="panel-head">
+              <h3>Profile & resume</h3>
+              <p className="muted">Keep your details current before applying</p>
+            </div>
+            <form className="grid-form surface-form" onSubmit={saveProfile}>
+              <label>
+                Full name
+                <input value={profile.full_name} onChange={updateField("full_name")} required />
+              </label>
+              <label>
+                Branch
+                <input value={profile.branch} onChange={updateField("branch")} placeholder="CSE" />
+              </label>
+              <label>
+                Year
+                <input value={profile.year} onChange={updateField("year")} type="number" />
+              </label>
+              <label>
+                CGPA
+                <input
+                  value={profile.cgpa}
+                  onChange={updateField("cgpa")}
+                  type="number"
+                  step="0.01"
+                />
+              </label>
+              <label className="full">
+                Phone
+                <input value={profile.phone} onChange={updateField("phone")} />
+              </label>
+              <button className="btn primary" type="submit">
+                Save profile
+              </button>
+            </form>
+
+            <div className="panel-head" style={{ marginTop: "1.4rem" }}>
+              <h3>Resume</h3>
+              <p className="muted">PDF only, max 5 MB. Required before applying.</p>
+            </div>
+            <p className="muted">
+              {profile.has_resume
+                ? `Uploaded: ${profile.resume_original_name || "resume.pdf"}`
+                : "No resume uploaded yet."}
+            </p>
+            <form className="grid-form surface-form" onSubmit={uploadResume}>
+              <label className="full">
+                Choose PDF
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                />
+              </label>
+              <div className="cta-row">
+                <button className="btn primary" type="submit">
+                  Upload resume
+                </button>
+                {profile.has_resume && (
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() =>
+                      downloadResume(
+                        "/students/me/resume",
+                        profile.resume_original_name || "resume.pdf"
+                      ).catch(() => setError("Could not download resume"))
+                    }
+                  >
+                    Download my resume
+                  </button>
+                )}
+              </div>
+            </form>
+          </>
+        )}
+      </section>
     </div>
   );
 }

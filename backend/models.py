@@ -109,17 +109,21 @@ class Drive(db.Model):
     location = db.Column(db.String(120))
     drive_date = db.Column(db.Date)
     deadline = db.Column(db.Date)
+    alternate_dates = db.Column(db.String(255))  # comma-separated YYYY-MM-DD
     min_cgpa = db.Column(db.Float, default=0.0)
     eligible_branches = db.Column(db.String(255))  # comma-separated
     description = db.Column(db.Text)
+    # proposed | needs_reschedule | scheduled | completed | cancelled
+    status = db.Column(db.String(30), default="proposed")
+    placement_note = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=utcnow)
 
     company = db.relationship("CompanyProfile", back_populates="drives")
     applications = db.relationship("Application", back_populates="drive", cascade="all, delete-orphan")
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_conflicts=False):
+        payload = {
             "id": self.id,
             "company_id": self.company_id,
             "company_name": self.company.company_name if self.company else None,
@@ -129,12 +133,20 @@ class Drive(db.Model):
             "location": self.location,
             "drive_date": self.drive_date.isoformat() if self.drive_date else None,
             "deadline": self.deadline.isoformat() if self.deadline else None,
+            "alternate_dates": self.alternate_dates,
             "min_cgpa": self.min_cgpa,
             "eligible_branches": self.eligible_branches,
             "description": self.description,
+            "status": self.status or "proposed",
+            "placement_note": self.placement_note,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_conflicts:
+            from scheduling import find_drive_conflicts
+
+            payload["conflicts"] = find_drive_conflicts(self)
+        return payload
 
 
 class Application(db.Model):
@@ -145,6 +157,8 @@ class Application(db.Model):
     drive_id = db.Column(db.Integer, db.ForeignKey("drives.id"), nullable=False)
     status = db.Column(db.String(20), default="applied")  # applied|shortlisted|rejected|selected
     applied_at = db.Column(db.DateTime, default=utcnow)
+    offer_letter_path = db.Column(db.String(255))
+    offer_original_name = db.Column(db.String(255))
 
     student = db.relationship("StudentProfile", back_populates="applications")
     drive = db.relationship("Drive", back_populates="applications")
@@ -160,8 +174,35 @@ class Application(db.Model):
             "drive_id": self.drive_id,
             "status": self.status,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
+            "has_offer_letter": bool(self.offer_letter_path),
+            "offer_original_name": self.offer_original_name,
             "student": self.student.to_dict() if self.student else None,
             "drive": self.drive.to_dict() if self.drive else None,
+        }
+
+
+class BlockedDate(db.Model):
+    """Exam/holiday windows that placement marks as blocked for drives."""
+
+    __tablename__ = "blocked_dates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.String(255))
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "end_date": self.end_date.isoformat() if self.end_date else None,
+            "reason": self.reason,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 

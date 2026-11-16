@@ -1,6 +1,6 @@
 import api from "./api";
 
-export async function downloadResume(url, fallbackName = "resume.pdf") {
+export async function downloadPdf(url, fallbackName = "file.pdf") {
   const response = await api.get(url, { responseType: "blob" });
   const blob = new Blob([response.data], { type: "application/pdf" });
   const objectUrl = window.URL.createObjectURL(blob);
@@ -11,4 +11,9 @@ export async function downloadResume(url, fallbackName = "resume.pdf") {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(objectUrl);
+}
+
+/** @deprecated use downloadPdf */
+export async function downloadResume(url, fallbackName = "resume.pdf") {
+  return downloadPdf(url, fallbackName);
 }

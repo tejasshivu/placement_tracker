@@ -30,22 +30,31 @@ function Shell() {
         <nav>
           {user ? (
             <>
-              <Link to={`/${user.role}`}>Dashboard</Link>
+              <span className={`role-chip role-${user.role}`}>{user.role}</span>
+              <Link className="nav-link" to={`/${user.role}`}>
+                Dashboard
+              </Link>
               <button className="btn ghost" onClick={logout}>
                 Log out
               </button>
             </>
           ) : (
             <>
-              <Link to="/login">Log in</Link>
-              <Link to="/register/student">Student</Link>
-              <Link to="/register/company">Company</Link>
+              <Link className="nav-link" to="/login">
+                Log in
+              </Link>
+              <Link className="nav-link" to="/register/student">
+                Student
+              </Link>
+              <Link className="btn primary compact" to="/register/company">
+                Company
+              </Link>
             </>
           )}
         </nav>
       </header>
 
-      <main>
+      <main className="page-main">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />

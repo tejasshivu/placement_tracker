@@ -3,7 +3,9 @@ from flask_jwt_extended import jwt_required
 from sqlalchemy import case, func
 
 from extensions import db
-from models import Announcement, Application, CompanyProfile, Drive, StudentProfile, User
+from datetime import date
+
+from models import Announcement, Application, BlockedDate, CompanyProfile, Drive, StudentProfile, User
 from utils import role_required
 
 placement_bp = Blueprint("placement", __name__, url_prefix="/api/placement")
@@ -34,6 +36,84 @@ def approve_company(company_id):
     company.user.is_approved = True
     db.session.commit()
     return jsonify({"message": "Company approved", "company": company.to_dict()})
+
+
+def _student_payload(student: StudentProfile):
+    app_count = Application.query.filter_by(student_id=student.id).count()
+    selected_count = Application.query.filter_by(
+        student_id=student.id, status="selected"
+    ).count()
+    return {
+        **student.to_dict(),
+        "email": student.user.email,
+        "is_approved": student.user.is_approved,
+        "registered_at": (
+            student.user.created_at.isoformat() if student.user.created_at else None
+        ),
+        "applications_count": app_count,
+        "selected_count": selected_count,
+    }
+
+
+@placement_bp.get("/students")
+@jwt_required()
+@role_required("placement")
+def list_students():
+    """Compact list of registered students for placement team."""
+    students = (
+        StudentProfile.query.join(User)
+        .order_by(StudentProfile.full_name.asc())
+        .all()
+    )
+    # Keep list light; full details are fetched on demand
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "full_name": s.full_name,
+                "email": s.user.email,
+                "branch": s.branch,
+                "has_resume": bool(s.resume_path),
+                "applications_count": Application.query.filter_by(student_id=s.id).count(),
+            }
+            for s in students
+        ]
+    )
+
+
+@placement_bp.get("/students/<int:student_id>")
+@jwt_required()
+@role_required("placement")
+def get_student(student_id):
+    student = StudentProfile.query.get_or_404(student_id)
+    return jsonify(_student_payload(student))
+
+
+@placement_bp.patch("/students/<int:student_id>")
+@jwt_required()
+@role_required("placement")
+def update_student(student_id):
+    student = StudentProfile.query.get_or_404(student_id)
+    data = request.get_json() or {}
+
+    for field in ("full_name", "branch", "phone"):
+        if field in data and data[field] is not None:
+            setattr(student, field, data[field])
+
+    if "year" in data:
+        student.year = int(data["year"]) if data["year"] not in (None, "") else None
+    if "cgpa" in data:
+        student.cgpa = float(data["cgpa"]) if data["cgpa"] not in (None, "") else None
+
+    if "email" in data and data["email"]:
+        new_email = data["email"].lower().strip()
+        existing = User.query.filter(User.email == new_email, User.id != student.user_id).first()
+        if existing:
+            return jsonify({"error": "Email already in use"}), 409
+        student.user.email = new_email
+
+    db.session.commit()
+    return jsonify(_student_payload(student))
 
 
 @placement_bp.get("/reports")
@@ -153,3 +233,51 @@ def create_announcement():
     db.session.add(row)
     db.session.commit()
     return jsonify(row.to_dict()), 201
+
+
+@placement_bp.get("/blocked-dates")
+@jwt_required()
+@role_required("placement", "company")
+def list_blocked_dates():
+    rows = BlockedDate.query.order_by(BlockedDate.start_date.asc()).all()
+    return jsonify([r.to_dict() for r in rows])
+
+
+@placement_bp.post("/blocked-dates")
+@jwt_required()
+@role_required("placement")
+def create_blocked_date():
+    from flask_jwt_extended import get_jwt_identity
+
+    data = request.get_json() or {}
+    title = data.get("title")
+    start = data.get("start_date")
+    end = data.get("end_date")
+    if not title or not start or not end:
+        return jsonify({"error": "title, start_date, and end_date are required"}), 400
+
+    start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end)
+    if end_date < start_date:
+        return jsonify({"error": "end_date cannot be before start_date"}), 400
+
+    row = BlockedDate(
+        title=title,
+        start_date=start_date,
+        end_date=end_date,
+        reason=data.get("reason"),
+        created_by=int(get_jwt_identity()),
+    )
+    db.session.add(row)
+    db.session.commit()
+    return jsonify(row.to_dict()), 201
+
+
+@placement_bp.delete("/blocked-dates/<int:block_id>")
+@jwt_required()
+@role_required("placement")
+def delete_blocked_date(block_id):
+    row = BlockedDate.query.get_or_404(block_id)
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"message": "Blocked date removed"})

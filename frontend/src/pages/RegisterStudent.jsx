@@ -33,45 +33,54 @@ export default function RegisterStudent() {
   };
 
   return (
-    <div className="auth-card">
-      <h2>Student registration</h2>
-      <form onSubmit={onSubmit}>
-        <label>
-          Full name
-          <input value={form.full_name} onChange={update("full_name")} required />
-        </label>
-        <label>
-          Email
-          <input value={form.email} onChange={update("email")} type="email" required />
-        </label>
-        <label>
-          Password
-          <input value={form.password} onChange={update("password")} type="password" required />
-        </label>
-        <label>
-          Branch
-          <input value={form.branch} onChange={update("branch")} placeholder="CSE" />
-        </label>
-        <label>
-          Year
-          <input value={form.year} onChange={update("year")} type="number" />
-        </label>
-        <label>
-          CGPA
-          <input value={form.cgpa} onChange={update("cgpa")} type="number" step="0.01" />
-        </label>
-        <label>
-          Phone
-          <input value={form.phone} onChange={update("phone")} />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="btn primary" type="submit">
-          Create account
-        </button>
-      </form>
-      <p className="muted">
-        Already registered? <Link to="/login">Log in</Link>
-      </p>
+    <div className="login-stage">
+      <section className="login-panel brand-panel">
+        <p className="login-kicker">CampusHire</p>
+        <h1>Join as a student</h1>
+        <p>Build your profile, track drives, and manage applications in one portal.</p>
+      </section>
+
+      <section className="login-panel form-panel">
+        <h2>Student registration</h2>
+        <p className="muted">Create your campus placement account.</p>
+        <form onSubmit={onSubmit} className="login-form register-grid">
+          <label>
+            Full name
+            <input value={form.full_name} onChange={update("full_name")} required />
+          </label>
+          <label>
+            Email
+            <input value={form.email} onChange={update("email")} type="email" required />
+          </label>
+          <label>
+            Password
+            <input value={form.password} onChange={update("password")} type="password" required />
+          </label>
+          <label>
+            Branch
+            <input value={form.branch} onChange={update("branch")} placeholder="CSE" />
+          </label>
+          <label>
+            Year
+            <input value={form.year} onChange={update("year")} type="number" />
+          </label>
+          <label>
+            CGPA
+            <input value={form.cgpa} onChange={update("cgpa")} type="number" step="0.01" />
+          </label>
+          <label className="full">
+            Phone
+            <input value={form.phone} onChange={update("phone")} />
+          </label>
+          {error && <p className="error">{error}</p>}
+          <button className="btn primary wide" type="submit">
+            Create account
+          </button>
+        </form>
+        <p className="muted">
+          Already registered? <Link to="/login">Log in</Link>
+        </p>
+      </section>
     </div>
   );
 }

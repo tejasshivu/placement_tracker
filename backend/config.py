@@ -19,4 +19,5 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "resumes")
-    MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB resumes
+    OFFER_UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "offers")
+    MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB files
