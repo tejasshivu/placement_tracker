@@ -25,12 +25,34 @@ def register_student():
     db.session.add(user)
     db.session.flush()
 
+    cgpa = data.get("cgpa")
+    if cgpa not in (None, ""):
+        try:
+            cgpa = float(cgpa)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid CGPA"}), 400
+        if cgpa < 0 or cgpa > 10:
+            return jsonify({"error": "CGPA must be between 0 and 10"}), 400
+    else:
+        cgpa = None
+
+    semester = data.get("semester", data.get("year"))
+    if semester not in (None, ""):
+        try:
+            semester = int(semester)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid semester"}), 400
+    else:
+        semester = None
+
+    from utils import normalize_branch
+
     profile = StudentProfile(
         user_id=user.id,
         full_name=data["full_name"],
-        branch=data.get("branch"),
-        year=data.get("year"),
-        cgpa=data.get("cgpa"),
+        branch=normalize_branch(data.get("branch")),
+        semester=semester,
+        cgpa=cgpa,
         phone=data.get("phone"),
     )
     db.session.add(profile)

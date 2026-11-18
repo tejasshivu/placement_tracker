@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api";
+import { COURSES, SEMESTERS } from "../constants/courses";
 
 export default function RegisterStudent() {
   const navigate = useNavigate();
@@ -9,7 +10,7 @@ export default function RegisterStudent() {
     password: "",
     full_name: "",
     branch: "",
-    year: "",
+    semester: "",
     cgpa: "",
     phone: "",
   });
@@ -20,11 +21,16 @@ export default function RegisterStudent() {
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const cgpa = form.cgpa === "" ? null : Number(form.cgpa);
+    if (cgpa !== null && (cgpa < 0 || cgpa > 10)) {
+      setError("CGPA must be between 0 and 10");
+      return;
+    }
     try {
       await api.post("/auth/register/student", {
         ...form,
-        year: form.year ? Number(form.year) : null,
-        cgpa: form.cgpa ? Number(form.cgpa) : null,
+        semester: form.semester ? Number(form.semester) : null,
+        cgpa,
       });
       navigate("/login");
     } catch (err) {
@@ -35,7 +41,7 @@ export default function RegisterStudent() {
   return (
     <div className="login-stage">
       <section className="login-panel brand-panel">
-        <p className="login-kicker">CampusHire</p>
+        <p className="login-kicker">Ascendia</p>
         <h1>Join as a student</h1>
         <p>Build your profile, track drives, and manage applications in one portal.</p>
       </section>
@@ -57,16 +63,37 @@ export default function RegisterStudent() {
             <input value={form.password} onChange={update("password")} type="password" required />
           </label>
           <label>
-            Branch
-            <input value={form.branch} onChange={update("branch")} placeholder="CSE" />
+            Course / Branch
+            <select value={form.branch} onChange={update("branch")} required>
+              <option value="">Select course</option>
+              {COURSES.map((course) => (
+                <option key={course} value={course}>
+                  {course}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
-            Year
-            <input value={form.year} onChange={update("year")} type="number" />
+            Semester
+            <select value={form.semester} onChange={update("semester")}>
+              <option value="">Select semester</option>
+              {SEMESTERS.map((sem) => (
+                <option key={sem} value={sem}>
+                  Semester {sem}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             CGPA
-            <input value={form.cgpa} onChange={update("cgpa")} type="number" step="0.01" />
+            <input
+              value={form.cgpa}
+              onChange={update("cgpa")}
+              type="number"
+              step="0.01"
+              min="0"
+              max="10"
+            />
           </label>
           <label className="full">
             Phone

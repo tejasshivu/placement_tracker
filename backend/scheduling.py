@@ -11,7 +11,11 @@ def _branch_set(value):
 
 
 def find_drive_conflicts(drive: Drive):
-    """Return conflict warnings for a drive's current date/branches."""
+    """Return conflict warnings for a drive's current date/time/branches.
+
+    Multiple drives on the same day are allowed when times differ.
+    Same day + same time + overlapping branches is treated as high severity.
+    """
     conflicts = []
     if not drive.drive_date:
         return conflicts
@@ -27,17 +31,38 @@ def find_drive_conflicts(drive: Drive):
     )
 
     my_branches = _branch_set(drive.eligible_branches)
+    my_time = (drive.drive_time or "").strip() or None
+
     for other in same_day:
         other_branches = _branch_set(other.eligible_branches)
-        branch_overlap = sorted(my_branches & other_branches) if my_branches and other_branches else []
+        branch_overlap = (
+            sorted(my_branches & other_branches) if my_branches and other_branches else []
+        )
         overlaps_all = (not my_branches) or (not other_branches)
+        other_time = (other.drive_time or "").strip() or None
+        same_slot = my_time == other_time  # both None or equal HH:MM
+
+        if same_slot and (branch_overlap or overlaps_all):
+            severity = "high"
+        elif same_slot:
+            severity = "medium"
+        else:
+            severity = "low"
+
+        time_note = ""
+        if other_time:
+            time_note = f" at {other_time}"
+        elif my_time:
+            time_note = " (no time set)"
+
         conflicts.append(
             {
                 "type": "drive_clash",
-                "severity": "high" if (branch_overlap or overlaps_all) else "medium",
+                "severity": severity,
                 "message": (
-                    f"Conflicts with '{other.title}' ({other.company.company_name if other.company else 'company'}) "
-                    f"on {other.drive_date.isoformat()}"
+                    f"{'Same-time clash with' if same_slot else 'Also on this day:'} "
+                    f"'{other.title}' ({other.company.company_name if other.company else 'company'})"
+                    f" on {other.drive_date.isoformat()}{time_note}"
                     + (f" for branches: {', '.join(branch_overlap)}" if branch_overlap else "")
                 ),
                 "other_drive_id": other.id,

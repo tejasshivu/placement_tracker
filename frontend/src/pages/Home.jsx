@@ -7,7 +7,7 @@ export default function Home() {
   return (
     <section className="hero hero-stage">
       <div className="hero-copy">
-        <p className="brand">CampusHire</p>
+        <p className="brand">Ascendia</p>
         <h1>College placement, in one place</h1>
         <p className="lead">
           Students track drives. Companies hire. Placement teams run the portal.

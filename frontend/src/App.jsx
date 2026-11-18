@@ -25,7 +25,7 @@ function Shell() {
     <div className="app-shell">
       <header className="topbar">
         <Link to="/" className="logo">
-          CampusHire
+          Ascendia
         </Link>
         <nav>
           {user ? (

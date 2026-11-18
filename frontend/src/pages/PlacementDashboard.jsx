@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../api";
 import { downloadPdf } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import MonthCalendar from "../components/MonthCalendar";
+import { COURSES, SEMESTERS } from "../constants/courses";
+import { DRIVE_ROUNDS, roundLabel } from "../constants/rounds";
+import { formatDriveWhen } from "../utils/driveWhen";
 
 const emptyReport = {
   summary: {
@@ -17,6 +21,8 @@ const emptyReport = {
   by_status: {
     applied: 0,
     shortlisted: 0,
+    in_round: 0,
+    waitlisted: 0,
     selected: 0,
     rejected: 0,
   },
@@ -27,6 +33,9 @@ const emptyReport = {
 export default function PlacementDashboard() {
   const [tab, setTab] = useState("reports");
   const [pending, setPending] = useState([]);
+  const [approvedCompanies, setApprovedCompanies] = useState([]);
+  const [selectedCompany, setSelectedCompany] = useState(null);
+  const [companyLoading, setCompanyLoading] = useState(false);
   const [students, setStudents] = useState([]);
   const [drives, setDrives] = useState([]);
   const [report, setReport] = useState(emptyReport);
@@ -34,10 +43,12 @@ export default function PlacementDashboard() {
   const [announcements, setAnnouncements] = useState([]);
   const [message, setMessage] = useState("");
   const [studentQuery, setStudentQuery] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [detailError, setDetailError] = useState("");
   const [savingStudent, setSavingStudent] = useState(false);
+  const [resumePreviewUrl, setResumePreviewUrl] = useState(null);
   const [blockedDates, setBlockedDates] = useState([]);
   const [blockForm, setBlockForm] = useState({
     title: "",
@@ -47,10 +58,13 @@ export default function PlacementDashboard() {
   });
   const [scheduleNotes, setScheduleNotes] = useState({});
   const [scheduleDates, setScheduleDates] = useState({});
+  const [scheduleTimes, setScheduleTimes] = useState({});
+  const [calendarDay, setCalendarDay] = useState(null);
 
   const load = async () => {
-    const [p, d, a, r, st, b] = await Promise.all([
+    const [p, approved, d, a, r, st, b] = await Promise.all([
       api.get("/placement/companies/pending"),
+      api.get("/placement/companies/approved"),
       api.get("/drives"),
       api.get("/placement/announcements"),
       api.get("/placement/reports"),
@@ -58,6 +72,7 @@ export default function PlacementDashboard() {
       api.get("/placement/blocked-dates"),
     ]);
     setPending(p.data);
+    setApprovedCompanies(approved.data);
     setDrives(d.data);
     setAnnouncements(a.data);
     setReport(r.data);
@@ -72,8 +87,35 @@ export default function PlacementDashboard() {
   const approve = async (companyId) => {
     await api.post(`/placement/companies/${companyId}/approve`);
     setMessage("Company approved");
+    if (selectedCompany?.id === companyId) {
+      await openCompany(companyId);
+    }
     await load();
   };
+
+  const setDriveRound = async (driveId, current_round) => {
+    try {
+      await api.patch(`/drives/${driveId}`, { current_round });
+      setMessage(`Drive round set to ${roundLabel(current_round)}`);
+      await load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Could not update drive round");
+    }
+  };
+
+  const openCompany = async (companyId) => {
+    setCompanyLoading(true);
+    try {
+      const { data } = await api.get(`/placement/companies/${companyId}`);
+      setSelectedCompany(data);
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Could not load company details");
+    } finally {
+      setCompanyLoading(false);
+    }
+  };
+
+  const closeCompany = () => setSelectedCompany(null);
 
   const postAnnouncement = async (e) => {
     e.preventDefault();
@@ -81,6 +123,32 @@ export default function PlacementDashboard() {
     setAnnouncement({ title: "", body: "" });
     setMessage("Announcement posted");
     await load();
+  };
+
+  const clearResumePreview = () => {
+    setResumePreviewUrl((prev) => {
+      if (prev) window.URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const loadResumePreview = async (studentId, hasResume) => {
+    clearResumePreview();
+    if (!hasResume) return;
+    try {
+      const response = await api.get(`/students/${studentId}/resume`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      setResumePreviewUrl((prev) => {
+        if (prev) window.URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch {
+      clearResumePreview();
+      setDetailError("Could not load resume preview");
+    }
   };
 
   const openStudent = async (studentId) => {
@@ -92,16 +160,18 @@ export default function PlacementDashboard() {
         full_name: data.full_name || "",
         email: data.email || "",
         branch: data.branch || "",
-        year: data.year ?? "",
+        semester: data.semester ?? "",
         cgpa: data.cgpa ?? "",
         phone: data.phone || "",
       });
+      await loadResumePreview(studentId, data.has_resume);
     } catch (err) {
       setMessage(err.response?.data?.error || "Could not load student details");
     }
   };
 
   const closeStudent = () => {
+    clearResumePreview();
     setSelectedStudent(null);
     setEditForm(null);
     setDetailError("");
@@ -110,20 +180,25 @@ export default function PlacementDashboard() {
   const saveStudent = async (e) => {
     e.preventDefault();
     if (!selectedStudent) return;
+    const cgpaNum = editForm.cgpa === "" ? null : Number(editForm.cgpa);
+    if (cgpaNum !== null && (cgpaNum < 0 || cgpaNum > 10)) {
+      setDetailError("CGPA must be between 0 and 10");
+      return;
+    }
     setSavingStudent(true);
     setDetailError("");
     try {
       const { data } = await api.patch(`/placement/students/${selectedStudent.id}`, {
         ...editForm,
-        year: editForm.year === "" ? null : Number(editForm.year),
-        cgpa: editForm.cgpa === "" ? null : Number(editForm.cgpa),
+        semester: editForm.semester === "" ? null : Number(editForm.semester),
+        cgpa: cgpaNum,
       });
       setSelectedStudent(data);
       setEditForm({
         full_name: data.full_name || "",
         email: data.email || "",
         branch: data.branch || "",
-        year: data.year ?? "",
+        semester: data.semester ?? "",
         cgpa: data.cgpa ?? "",
         phone: data.phone || "",
       });
@@ -138,10 +213,18 @@ export default function PlacementDashboard() {
 
   const scheduleAction = async (driveId, action) => {
     try {
+      const drive = drives.find((d) => d.id === driveId);
       const { data } = await api.post(`/drives/${driveId}/schedule`, {
         action,
-        placement_note: scheduleNotes[driveId] || "",
-        drive_date: scheduleDates[driveId] || undefined,
+        placement_note:
+          scheduleNotes[driveId] !== undefined
+            ? scheduleNotes[driveId]
+            : drive?.placement_note || "",
+        drive_date: scheduleDates[driveId] || drive?.drive_date || undefined,
+        drive_time:
+          scheduleTimes[driveId] !== undefined
+            ? scheduleTimes[driveId] || null
+            : drive?.drive_time || undefined,
       });
       setMessage(
         action === "approve"
@@ -182,7 +265,32 @@ export default function PlacementDashboard() {
 
   const s = report.summary;
   const q = studentQuery.trim().toLowerCase();
+
+  const branchKey = (branch) => {
+    const trimmed = (branch || "").trim();
+    return trimmed ? trimmed.toUpperCase() : "Unassigned";
+  };
+
+  const branchGroups = useMemo(() => {
+    const map = new Map();
+    students.forEach((student) => {
+      const key = branchKey(student.branch);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(student);
+    });
+    return Array.from(map.entries())
+      .map(([branch, list]) => ({
+        branch,
+        count: list.length,
+        withResume: list.filter((item) => item.has_resume).length,
+      }))
+      .sort((a, b) => a.branch.localeCompare(b.branch));
+  }, [students]);
+
   const filteredStudents = students.filter((student) => {
+    if (selectedBranch) {
+      if (branchKey(student.branch) !== selectedBranch) return false;
+    }
     if (!q) return true;
     return [student.full_name, student.email, student.branch]
       .filter(Boolean)
@@ -192,12 +300,32 @@ export default function PlacementDashboard() {
     ["proposed", "needs_reschedule"].includes(d.status)
   );
 
+  const markedDriveDates = useMemo(() => {
+    const map = {};
+    drives.forEach((drive) => {
+      if (!drive.drive_date || drive.status === "cancelled") return;
+      map[drive.drive_date] = (map[drive.drive_date] || 0) + 1;
+    });
+    return map;
+  }, [drives]);
+
+  const drivesOnCalendarDay = useMemo(() => {
+    if (!calendarDay) return [];
+    return drives
+      .filter((d) => d.drive_date === calendarDay && d.status !== "cancelled")
+      .sort((a, b) => String(a.drive_time || "").localeCompare(String(b.drive_time || "")));
+  }, [drives, calendarDay]);
+
   const tabs = [
     { id: "reports", label: "Reports" },
     { id: "scheduling", label: "Scheduling", count: pendingSchedule.length },
-    { id: "calendar", label: "Exam calendar", count: blockedDates.length },
+    { id: "calendar", label: "Calendar" },
     { id: "students", label: "Students", count: students.length },
-    { id: "companies", label: "Companies", count: pending.length },
+    {
+      id: "companies",
+      label: "Companies",
+      count: pending.length + approvedCompanies.length,
+    },
     { id: "drives", label: "Drives", count: drives.length },
     { id: "announcements", label: "Announcements", count: announcements.length },
   ];
@@ -235,85 +363,142 @@ export default function PlacementDashboard() {
           <>
             <div className="panel-head">
               <h3>Drive scheduling</h3>
-              <p className="muted">
-                Coordinate dates with companies. Conflict checks cover other drives and exam blocks.
-              </p>
+              <p className="muted">Edit slot → Approve / Reschedule / Cancel</p>
             </div>
-            <div className="card-list">
-              {drives.map((drive) => (
-                <article key={drive.id} className="soft-card">
-                  <div className="row-card" style={{ padding: 0, border: "none" }}>
-                    <div>
-                      <strong>{drive.title}</strong>
-                      <p className="muted">
-                        {drive.company_name} · Preferred: {drive.drive_date || "TBA"} · Branches:{" "}
-                        {drive.eligible_branches || "All"}
-                      </p>
-                      {drive.alternate_dates && (
-                        <p className="muted">Alternates: {drive.alternate_dates}</p>
-                      )}
-                      {drive.placement_note && (
-                        <p className="warn-note">Note: {drive.placement_note}</p>
-                      )}
-                    </div>
-                    <span className={`status-pill status-${drive.status}`}>{drive.status}</span>
-                  </div>
-
-                  {!!drive.conflicts?.length && (
-                    <div className="conflict-box">
-                      {drive.conflicts.map((c, idx) => (
-                        <p key={idx} className={c.severity === "high" ? "error" : "muted"}>
-                          ⚠ {c.message}
-                        </p>
-                      ))}
-                    </div>
+            <div className="table-wrap sheet-wrap">
+              <table className="report-table sheet-table sheet-compact">
+                <thead>
+                  <tr>
+                    <th>Company / Drive</th>
+                    <th>Branches</th>
+                    <th>Status</th>
+                    <th>Round</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Note</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drives.map((drive) => {
+                    const conflictCount = drive.conflicts?.length || 0;
+                    const hasHigh = (drive.conflicts || []).some((c) => c.severity === "high");
+                    return (
+                      <tr key={drive.id}>
+                        <td>
+                          <strong>{drive.company_name || "—"}</strong>
+                          <div className="sheet-sub">
+                            {drive.title}
+                            {drive.role ? ` · ${drive.role}` : ""}
+                            {drive.package_lpa != null ? ` · ${drive.package_lpa} LPA` : ""}
+                          </div>
+                          {drive.alternate_dates && (
+                            <div className="sheet-sub">Alt: {drive.alternate_dates}</div>
+                          )}
+                        </td>
+                        <td>{drive.eligible_branches || "All"}</td>
+                        <td>
+                          <span className={`status-pill status-${drive.status}`}>
+                            {drive.status}
+                          </span>
+                          {conflictCount > 0 && (
+                            <div
+                              className={hasHigh ? "error sheet-conflict" : "muted sheet-conflict"}
+                              title={(drive.conflicts || []).map((c) => c.message).join("\n")}
+                            >
+                              {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <select
+                            className="sheet-input"
+                            value={drive.current_round || "registration"}
+                            onChange={(e) => setDriveRound(drive.id, e.target.value)}
+                          >
+                            {DRIVE_ROUNDS.map((r) => (
+                              <option key={r.key} value={r.key}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            className="sheet-input"
+                            type="date"
+                            value={scheduleDates[drive.id] ?? drive.drive_date ?? ""}
+                            onChange={(e) =>
+                              setScheduleDates({
+                                ...scheduleDates,
+                                [drive.id]: e.target.value,
+                              })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="sheet-input sheet-input-time"
+                            type="time"
+                            value={scheduleTimes[drive.id] ?? drive.drive_time ?? ""}
+                            onChange={(e) =>
+                              setScheduleTimes({
+                                ...scheduleTimes,
+                                [drive.id]: e.target.value,
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="sheet-note-cell">
+                          <input
+                            className="sheet-input sheet-input-wide"
+                            value={scheduleNotes[drive.id] ?? drive.placement_note ?? ""}
+                            onChange={(e) =>
+                              setScheduleNotes({
+                                ...scheduleNotes,
+                                [drive.id]: e.target.value,
+                              })
+                            }
+                            placeholder="Note…"
+                          />
+                        </td>
+                        <td>
+                          <div className="sheet-actions sheet-actions-row">
+                            <button
+                              className="btn primary"
+                              type="button"
+                              onClick={() => scheduleAction(drive.id, "approve")}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => scheduleAction(drive.id, "request_reschedule")}
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => scheduleAction(drive.id, "cancel")}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!drives.length && (
+                    <tr>
+                      <td colSpan={8} className="muted">
+                        No drives to schedule.
+                      </td>
+                    </tr>
                   )}
-
-                  <div className="grid-form" style={{ marginTop: "0.8rem" }}>
-                    <label>
-                      Confirm / suggest date
-                      <input
-                        type="date"
-                        value={scheduleDates[drive.id] ?? drive.drive_date ?? ""}
-                        onChange={(e) =>
-                          setScheduleDates({ ...scheduleDates, [drive.id]: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="full">
-                      Placement note
-                      <input
-                        value={scheduleNotes[drive.id] ?? ""}
-                        onChange={(e) =>
-                          setScheduleNotes({ ...scheduleNotes, [drive.id]: e.target.value })
-                        }
-                        placeholder="Exam week / clash with Infosys drive..."
-                      />
-                    </label>
-                  </div>
-                  <div className="cta-row" style={{ marginTop: "0.75rem" }}>
-                    <button
-                      className="btn primary"
-                      onClick={() => scheduleAction(drive.id, "approve")}
-                    >
-                      Approve & schedule
-                    </button>
-                    <button
-                      className="btn ghost"
-                      onClick={() => scheduleAction(drive.id, "request_reschedule")}
-                    >
-                      Request reschedule
-                    </button>
-                    <button
-                      className="btn ghost"
-                      onClick={() => scheduleAction(drive.id, "cancel")}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </article>
-              ))}
-              {!drives.length && <p className="muted empty-note">No drives to schedule.</p>}
+                </tbody>
+              </table>
             </div>
           </>
         )}
@@ -321,8 +506,43 @@ export default function PlacementDashboard() {
         {tab === "calendar" && (
           <>
             <div className="panel-head">
-              <h3>Exam / blocked calendar</h3>
-              <p className="muted">Mark periods when drives should not be scheduled</p>
+              <h3>Drive calendar</h3>
+              <p className="muted">Days with drives are marked — tap a day to see the schedule</p>
+            </div>
+            <div className="calendar-layout">
+              <MonthCalendar
+                markedDates={markedDriveDates}
+                selectedDate={calendarDay}
+                onSelectDate={setCalendarDay}
+              />
+              <div className="calendar-day-panel">
+                <h4>{calendarDay ? `Drives on ${calendarDay}` : "Select a day"}</h4>
+                {calendarDay && (
+                  <div className="card-list">
+                    {drivesOnCalendarDay.map((drive) => (
+                      <article key={drive.id} className="soft-card">
+                        <strong>{drive.title}</strong>
+                        <p className="muted">
+                          {drive.company_name} · {drive.drive_time || "Time TBA"} ·{" "}
+                          {drive.status}
+                        </p>
+                        <p className="muted">Branches: {drive.eligible_branches || "All"}</p>
+                      </article>
+                    ))}
+                    {!drivesOnCalendarDay.length && (
+                      <p className="muted empty-note">No drives on this date.</p>
+                    )}
+                  </div>
+                )}
+                {!calendarDay && (
+                  <p className="muted">Marked dates have one or more company drives.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="panel-head" style={{ marginTop: "1.6rem" }}>
+              <h3>Exam / blocked periods</h3>
+              <p className="muted">Mark windows when drives should not be scheduled</p>
             </div>
             <form className="grid-form surface-form" onSubmit={addBlockedDate}>
               <label>
@@ -483,63 +703,189 @@ export default function PlacementDashboard() {
         {tab === "students" && (
           <>
             <div className="panel-head">
-              <h3>Registered students</h3>
-              <p className="muted">Open a student only when you need full details</p>
-            </div>
-            <label className="full search-field">
-              Search students
-              <input
-                value={studentQuery}
-                onChange={(e) => setStudentQuery(e.target.value)}
-                placeholder="Name, email, branch"
-              />
-            </label>
-            <div className="card-list">
-              {filteredStudents.map((student) => (
-                <article key={student.id} className="soft-card row-card">
-                  <div>
-                    <strong>{student.full_name}</strong>
-                    <p className="muted">
-                      {student.email}
-                      {student.branch ? ` · ${student.branch}` : ""} · {student.applications_count}{" "}
-                      apps
-                    </p>
-                  </div>
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => openStudent(student.id)}
-                  >
-                    View / Edit
-                  </button>
-                </article>
-              ))}
-              {!filteredStudents.length && (
-                <p className="muted empty-note">No registered students found.</p>
+              <div>
+                <h3>
+                  {selectedBranch
+                    ? `${selectedBranch} students`
+                    : "Students by branch"}
+                </h3>
+                <p className="muted">
+                  {selectedBranch
+                    ? "Tap a student name to preview their resume"
+                    : "Choose a branch to browse its students"}
+                </p>
+              </div>
+              {selectedBranch && (
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => {
+                    setSelectedBranch(null);
+                    setStudentQuery("");
+                  }}
+                >
+                  All branches
+                </button>
               )}
             </div>
+
+            {!selectedBranch ? (
+              <div className="branch-grid">
+                {branchGroups.map((group) => (
+                  <button
+                    key={group.branch}
+                    type="button"
+                    className="branch-tile"
+                    onClick={() => {
+                      setSelectedBranch(group.branch);
+                      setStudentQuery("");
+                    }}
+                  >
+                    <strong>{group.branch}</strong>
+                    <span>
+                      {group.count} student{group.count === 1 ? "" : "s"}
+                    </span>
+                    <span className="muted">
+                      {group.withResume} resume{group.withResume === 1 ? "" : "s"}
+                    </span>
+                  </button>
+                ))}
+                {!branchGroups.length && (
+                  <p className="muted empty-note">No registered students found.</p>
+                )}
+              </div>
+            ) : (
+              <>
+                <label className="full search-field">
+                  Search in {selectedBranch}
+                  <input
+                    value={studentQuery}
+                    onChange={(e) => setStudentQuery(e.target.value)}
+                    placeholder="Name or email"
+                  />
+                </label>
+                <div className="card-list">
+                  {filteredStudents.map((student) => (
+                    <article key={student.id} className="soft-card row-card">
+                      <button
+                        type="button"
+                        className="student-name-btn"
+                        onClick={() => openStudent(student.id)}
+                      >
+                        <strong>{student.full_name}</strong>
+                        <p className="muted">
+                          {student.email} · {student.applications_count} apps
+                          {student.has_resume ? " · Resume ready" : " · No resume"}
+                        </p>
+                      </button>
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() => openStudent(student.id)}
+                      >
+                        Preview
+                      </button>
+                    </article>
+                  ))}
+                  {!filteredStudents.length && (
+                    <p className="muted empty-note">No students in this branch.</p>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
 
         {tab === "companies" && (
           <>
             <div className="panel-head">
-              <h3>Pending company approvals</h3>
-              <p className="muted">Approve hiring partners before they post drives</p>
+              <h3>Companies</h3>
+              <p className="muted">Approve new partners and track who already has access</p>
             </div>
+
+            <h4 className="section-label">Pending approval</h4>
             <div className="card-list">
               {pending.map((c) => (
                 <article key={c.id} className="soft-card row-card">
-                  <div>
+                  <button
+                    type="button"
+                    className="student-name-btn"
+                    onClick={() => openCompany(c.id)}
+                  >
                     <strong>{c.company_name}</strong>
-                    <p className="muted">{c.email}</p>
-                  </div>
-                  <button className="btn primary" onClick={() => approve(c.id)}>
-                    Approve
+                    <p className="muted">
+                      {c.email}
+                      {c.website ? ` · ${c.website}` : ""}
+                    </p>
                   </button>
+                  <div className="cta-row">
+                    <button className="btn ghost" type="button" onClick={() => openCompany(c.id)}>
+                      View
+                    </button>
+                    <button className="btn primary" type="button" onClick={() => approve(c.id)}>
+                      Approve
+                    </button>
+                  </div>
                 </article>
               ))}
               {!pending.length && <p className="muted empty-note">No pending companies.</p>}
+            </div>
+
+            <h4 className="section-label" style={{ marginTop: "1.4rem" }}>
+              Approved companies ({approvedCompanies.length})
+            </h4>
+            <div className="table-wrap sheet-wrap">
+              <table className="report-table sheet-table sheet-compact">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Email</th>
+                    <th>Website</th>
+                    <th>HR contact</th>
+                    <th>Drives</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvedCompanies.map((c) => (
+                    <tr key={c.id}>
+                      <td>
+                        <button
+                          type="button"
+                          className="student-name-btn"
+                          onClick={() => openCompany(c.id)}
+                        >
+                          <strong>{c.company_name}</strong>
+                        </button>
+                      </td>
+                      <td>{c.email || "—"}</td>
+                      <td>{c.website || "—"}</td>
+                      <td>{c.hr_contact || "—"}</td>
+                      <td>{c.drives_count ?? 0}</td>
+                      <td>
+                        <span className="status-pill status-scheduled">approved</span>
+                      </td>
+                      <td>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => openCompany(c.id)}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!approvedCompanies.length && (
+                    <tr>
+                      <td colSpan={7} className="muted">
+                        No approved companies yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </>
         )}
@@ -548,22 +894,66 @@ export default function PlacementDashboard() {
           <>
             <div className="panel-head">
               <h3>All drives</h3>
-              <p className="muted">Campus-wide hiring calendar with schedule status</p>
+              <p className="muted">
+                Overview sheet — use Scheduling to approve, reschedule, or cancel
+              </p>
             </div>
-            <div className="card-list">
-              {drives.map((drive) => (
-                <article key={drive.id} className="soft-card row-card">
-                  <div>
-                    <strong>{drive.title}</strong>
-                    <p className="muted">
-                      {drive.company_name} · {drive.drive_date || "TBA"} · {drive.package_lpa || "-"}{" "}
-                      LPA
-                    </p>
-                  </div>
-                  <span className={`status-pill status-${drive.status}`}>{drive.status}</span>
-                </article>
-              ))}
-              {!drives.length && <p className="muted empty-note">No drives yet.</p>}
+            <div className="table-wrap sheet-wrap">
+              <table className="report-table sheet-table">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Drive</th>
+                    <th>Role</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Round</th>
+                    <th>Branches</th>
+                    <th>Package</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drives.map((drive) => (
+                    <tr key={drive.id}>
+                      <td>{drive.company_name || "—"}</td>
+                      <td>
+                        <strong>{drive.title}</strong>
+                      </td>
+                      <td>{drive.role || "—"}</td>
+                      <td>{drive.drive_date || "TBA"}</td>
+                      <td>{drive.drive_time || "—"}</td>
+                      <td>
+                        <select
+                          className="sheet-input"
+                          value={drive.current_round || "registration"}
+                          onChange={(e) => setDriveRound(drive.id, e.target.value)}
+                        >
+                          {DRIVE_ROUNDS.map((r) => (
+                            <option key={r.key} value={r.key}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{drive.eligible_branches || "All"}</td>
+                      <td>{drive.package_lpa != null ? `${drive.package_lpa} LPA` : "—"}</td>
+                      <td>
+                        <span className={`status-pill status-${drive.status}`}>
+                          {drive.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {!drives.length && (
+                    <tr>
+                      <td colSpan={9} className="muted">
+                        No drives yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </>
         )}
@@ -611,17 +1001,147 @@ export default function PlacementDashboard() {
         )}
       </section>
 
-      {selectedStudent && editForm && (
-        <div className="modal-backdrop" onClick={closeStudent}>
+      {selectedCompany && (
+        <div className="modal-backdrop" onClick={closeCompany}>
           <div
-            className="modal-panel"
+            className="modal-panel modal-compact"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="Student details"
+            aria-label="Company details"
+          >
+            <div className="modal-header modal-header-compact">
+              <div>
+                <h3>{selectedCompany.company_name}</h3>
+                <p className="muted compact-meta">
+                  <span
+                    className={`status-pill status-${
+                      selectedCompany.is_approved ? "scheduled" : "proposed"
+                    }`}
+                  >
+                    {selectedCompany.is_approved ? "approved" : "pending"}
+                  </span>
+                  {selectedCompany.registered_at
+                    ? ` · ${selectedCompany.registered_at.slice(0, 10)}`
+                    : ""}
+                  {` · ${selectedCompany.drives_count ?? 0} drives`}
+                </p>
+              </div>
+              <button className="btn ghost" type="button" onClick={closeCompany}>
+                Close
+              </button>
+            </div>
+
+            {companyLoading ? (
+              <p className="muted">Loading…</p>
+            ) : (
+              <>
+                <table className="compact-kv">
+                  <tbody>
+                    <tr>
+                      <th>Email</th>
+                      <td>{selectedCompany.email || "—"}</td>
+                    </tr>
+                    <tr>
+                      <th>Website</th>
+                      <td>
+                        {selectedCompany.website ? (
+                          <a
+                            href={
+                              selectedCompany.website.startsWith("http")
+                                ? selectedCompany.website
+                                : `https://${selectedCompany.website}`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {selectedCompany.website}
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>HR</th>
+                      <td>{selectedCompany.hr_contact || "—"}</td>
+                    </tr>
+                    <tr>
+                      <th>About</th>
+                      <td>{selectedCompany.description || "—"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <p className="section-label" style={{ marginTop: "0.75rem" }}>
+                  Drives
+                </p>
+                <div className="table-wrap sheet-wrap">
+                  <table className="report-table sheet-table sheet-compact">
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>When</th>
+                        <th>Role</th>
+                        <th>Pkg</th>
+                        <th>Branches</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedCompany.drives || []).map((drive) => (
+                        <tr key={drive.id}>
+                          <td>{drive.title}</td>
+                          <td>{formatDriveWhen(drive)}</td>
+                          <td>{drive.role || "—"}</td>
+                          <td>{drive.package_lpa != null ? drive.package_lpa : "—"}</td>
+                          <td>{drive.eligible_branches || "All"}</td>
+                          <td>
+                            <span className={`status-pill status-${drive.status}`}>
+                              {drive.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {!selectedCompany.drives?.length && (
+                        <tr>
+                          <td colSpan={6} className="muted">
+                            No drives yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {!selectedCompany.is_approved && (
+                  <div className="cta-row" style={{ marginTop: "0.75rem" }}>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      onClick={() => approve(selectedCompany.id)}
+                    >
+                      Approve
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedStudent && editForm && (
+        <div className="modal-backdrop" onClick={closeStudent}>
+          <div
+            className="modal-panel modal-panel-wide"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Student resume preview"
           >
             <div className="modal-header">
-              <h3>Student details</h3>
+              <h3>{selectedStudent.full_name}</h3>
               <button className="btn ghost" type="button" onClick={closeStudent}>
                 Close
               </button>
@@ -634,6 +1154,22 @@ export default function PlacementDashboard() {
                 ? selectedStudent.resume_original_name || "Uploaded"
                 : "Not uploaded"}
             </p>
+
+            <div className="resume-preview-box">
+              {resumePreviewUrl ? (
+                <iframe
+                  title="Resume preview"
+                  src={resumePreviewUrl}
+                  className="resume-iframe"
+                />
+              ) : (
+                <p className="muted empty-note">
+                  {selectedStudent.has_resume
+                    ? "Loading resume preview…"
+                    : "No resume uploaded for this student."}
+                </p>
+              )}
+            </div>
 
             <form className="grid-form" onSubmit={saveStudent}>
               <label>
@@ -654,19 +1190,35 @@ export default function PlacementDashboard() {
                 />
               </label>
               <label>
-                Branch
-                <input
+                Course / Branch
+                <select
                   value={editForm.branch}
                   onChange={(e) => setEditForm({ ...editForm, branch: e.target.value })}
-                />
+                >
+                  <option value="">Select course</option>
+                  {COURSES.map((course) => (
+                    <option key={course} value={course}>
+                      {course}
+                    </option>
+                  ))}
+                  {editForm.branch && !COURSES.includes(editForm.branch) && (
+                    <option value={editForm.branch}>{editForm.branch}</option>
+                  )}
+                </select>
               </label>
               <label>
-                Year
-                <input
-                  value={editForm.year}
-                  onChange={(e) => setEditForm({ ...editForm, year: e.target.value })}
-                  type="number"
-                />
+                Semester
+                <select
+                  value={editForm.semester}
+                  onChange={(e) => setEditForm({ ...editForm, semester: e.target.value })}
+                >
+                  <option value="">Select semester</option>
+                  {SEMESTERS.map((sem) => (
+                    <option key={sem} value={sem}>
+                      Semester {sem}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 CGPA
@@ -675,6 +1227,8 @@ export default function PlacementDashboard() {
                   onChange={(e) => setEditForm({ ...editForm, cgpa: e.target.value })}
                   type="number"
                   step="0.01"
+                  min="0"
+                  max="10"
                 />
               </label>
               <label>

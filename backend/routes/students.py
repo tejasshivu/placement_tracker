@@ -34,14 +34,28 @@ def update_my_profile():
     profile = user.student_profile
     data = request.get_json() or {}
 
-    for field in ("full_name", "branch", "phone"):
+    from utils import normalize_branch
+
+    for field in ("full_name", "phone"):
         if field in data and data[field] is not None:
             setattr(profile, field, data[field])
+    if "branch" in data and data["branch"] is not None:
+        profile.branch = normalize_branch(data["branch"])
 
-    if "year" in data:
-        profile.year = int(data["year"]) if data["year"] not in (None, "") else None
+    semester_value = data["semester"] if "semester" in data else data.get("year")
+    if "semester" in data or "year" in data:
+        profile.semester = (
+            int(semester_value) if semester_value not in (None, "") else None
+        )
+
     if "cgpa" in data:
-        profile.cgpa = float(data["cgpa"]) if data["cgpa"] not in (None, "") else None
+        if data["cgpa"] in (None, ""):
+            profile.cgpa = None
+        else:
+            cgpa = float(data["cgpa"])
+            if cgpa < 0 or cgpa > 10:
+                return jsonify({"error": "CGPA must be between 0 and 10"}), 400
+            profile.cgpa = cgpa
 
     db.session.commit()
     return jsonify(profile.to_dict())
@@ -135,4 +149,11 @@ def _send_resume(profile: StudentProfile):
         return jsonify({"error": "Resume file missing on server"}), 404
 
     download_name = profile.resume_original_name or f"{profile.full_name}_resume.pdf"
-    return send_file(path, mimetype="application/pdf", as_attachment=True, download_name=download_name)
+    # Blob preview uses attachment; query inline=1 keeps Content-Disposition friendly for browsers
+    as_attachment = request.args.get("inline") != "1"
+    return send_file(
+        path,
+        mimetype="application/pdf",
+        as_attachment=as_attachment,
+        download_name=download_name,
+    )

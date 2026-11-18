@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../api";
 import { useAuth } from "../AuthContext";
 import { downloadPdf } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import MonthCalendar from "../components/MonthCalendar";
+import { APP_STATUSES, DRIVE_ROUNDS, roundLabel } from "../constants/rounds";
+import { formatDriveWhen } from "../utils/driveWhen";
 
 const emptyDrive = {
   title: "",
@@ -10,6 +13,7 @@ const emptyDrive = {
   package_lpa: "",
   location: "",
   drive_date: "",
+  drive_time: "",
   deadline: "",
   alternate_dates: "",
   min_cgpa: "6.5",
@@ -26,15 +30,41 @@ export default function CompanyDashboard() {
   const [applicants, setApplicants] = useState([]);
   const [message, setMessage] = useState("");
   const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
   const [offerFiles, setOfferFiles] = useState({});
+  const [campusDrives, setCampusDrives] = useState([]);
+  const [blockedDates, setBlockedDates] = useState([]);
+  const [calendarDay, setCalendarDay] = useState(null);
+  const [roundForms, setRoundForms] = useState({});
 
   const loadDrives = async () => {
     const { data } = await api.get("/drives");
     setDrives(data);
+    const forms = {};
+    data.forEach((drive) => {
+      const info = drive.current_round_info || {};
+      forms[drive.id] = {
+        current_round: drive.current_round || "registration",
+        date: info.date || "",
+        time: info.time || "",
+        venue: info.venue || "",
+        meet_link: info.meet_link || "",
+        notes: info.notes || "",
+      };
+    });
+    setRoundForms(forms);
+  };
+
+  const loadCalendar = async () => {
+    const { data } = await api.get("/drives/campus-calendar");
+    setCampusDrives(data.drives || []);
+    setBlockedDates(data.blocked_dates || []);
   };
 
   useEffect(() => {
-    loadDrives().catch(() => setMessage("Could not load drives"));
+    Promise.all([loadDrives(), loadCalendar()]).catch(() =>
+      setMessage("Could not load company data")
+    );
   }, []);
 
   const update = (key) => (e) => setForm({ ...form, [key]: e.target.value });
@@ -49,8 +79,8 @@ export default function CompanyDashboard() {
         min_cgpa: form.min_cgpa ? Number(form.min_cgpa) : 0,
       });
       setForm(emptyDrive);
-      setMessage("Drive proposed. Waiting for placement date approval.");
-      await loadDrives();
+      setMessage("Drive proposed. Waiting for placement date/time approval.");
+      await Promise.all([loadDrives(), loadCalendar()]);
       setTab("drives");
     } catch (err) {
       setMessage(err.response?.data?.error || "Could not create drive");
@@ -63,10 +93,14 @@ export default function CompanyDashboard() {
       return;
     }
     try {
-      await api.patch(`/drives/${driveId}`, { drive_date: rescheduleDate });
-      setMessage("New date proposed to placement team");
+      await api.patch(`/drives/${driveId}`, {
+        drive_date: rescheduleDate,
+        drive_time: rescheduleTime || null,
+      });
+      setMessage("New date/time proposed to placement team");
       setRescheduleDate("");
-      await loadDrives();
+      setRescheduleTime("");
+      await Promise.all([loadDrives(), loadCalendar()]);
     } catch (err) {
       setMessage(err.response?.data?.error || "Could not update date");
     }
@@ -79,9 +113,56 @@ export default function CompanyDashboard() {
     setTab("applicants");
   };
 
-  const setStatus = async (applicationId, status) => {
-    await api.patch(`/applications/${applicationId}/status`, { status });
-    await viewApplicants(selectedDrive);
+  const setStatus = async (applicationId, payload) => {
+    try {
+      await api.patch(
+        `/applications/${applicationId}/status`,
+        typeof payload === "string" ? { status: payload } : payload
+      );
+      await viewApplicants(selectedDrive);
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Could not update applicant");
+    }
+  };
+
+  const updateRoundForm = (driveId, key, value) => {
+    setRoundForms((prev) => ({
+      ...prev,
+      [driveId]: { ...prev[driveId], [key]: value },
+    }));
+  };
+
+  const saveRound = async (driveId) => {
+    const form = roundForms[driveId];
+    if (!form) return;
+    try {
+      await api.patch(`/drives/${driveId}`, {
+        current_round: form.current_round,
+        round_detail: {
+          round: form.current_round,
+          date: form.date,
+          time: form.time,
+          venue: form.venue,
+          meet_link: form.meet_link,
+          notes: form.notes,
+        },
+      });
+      setMessage(`Round updated to ${roundLabel(form.current_round)} (students notified)`);
+      await Promise.all([loadDrives(), loadCalendar()]);
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Could not update round");
+    }
+  };
+
+  const advanceIntoRound = async (driveId) => {
+    try {
+      const { data } = await api.post(`/drives/${driveId}/advance-round`);
+      setMessage(data.message);
+      if (selectedDrive === driveId) await viewApplicants(driveId);
+      await loadDrives();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Could not advance applicants");
+    }
   };
 
   const uploadOffer = async (applicationId) => {
@@ -104,8 +185,46 @@ export default function CompanyDashboard() {
   };
 
   const selectedTitle = drives.find((d) => d.id === selectedDrive)?.title;
+
+  const markedDriveDates = useMemo(() => {
+    const map = {};
+    campusDrives.forEach((drive) => {
+      if (!drive.drive_date) return;
+      map[drive.drive_date] = (map[drive.drive_date] || 0) + 1;
+    });
+    return map;
+  }, [campusDrives]);
+
+  const blockedDateMap = useMemo(() => {
+    const map = {};
+    const pad = (n) => String(n).padStart(2, "0");
+    blockedDates.forEach((block) => {
+      if (!block.start_date || !block.end_date) return;
+      const start = new Date(`${block.start_date}T00:00:00`);
+      const end = new Date(`${block.end_date}T00:00:00`);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        map[iso] = true;
+      }
+    });
+    return map;
+  }, [blockedDates]);
+
+  const drivesOnDay = useMemo(() => {
+    if (!calendarDay) return [];
+    return campusDrives.filter((d) => d.drive_date === calendarDay);
+  }, [campusDrives, calendarDay]);
+
+  const blocksOnDay = useMemo(() => {
+    if (!calendarDay) return [];
+    return blockedDates.filter(
+      (b) => b.start_date <= calendarDay && b.end_date >= calendarDay
+    );
+  }, [blockedDates, calendarDay]);
+
   const tabs = [
     { id: "drives", label: "My drives", count: drives.length },
+    { id: "calendar", label: "Calendar" },
     { id: "post", label: "Propose drive" },
     { id: "applicants", label: "Applicants", count: applicants.length },
   ];
@@ -143,48 +262,207 @@ export default function CompanyDashboard() {
           <>
             <div className="panel-head">
               <h3>Your drives</h3>
-              <p className="muted">Placement must approve dates before students can apply</p>
+              <p className="muted">
+                You can post multiple drives on the same day with different times. Placement
+                approves before students can apply.
+              </p>
             </div>
             <div className="card-list">
-              {drives.map((drive) => (
-                <article key={drive.id} className="soft-card">
-                  <div className="row-card" style={{ padding: 0, border: "none" }}>
-                    <div>
-                      <strong>{drive.title}</strong>
-                      <p className="muted">
-                        {drive.role} · Preferred date: {drive.drive_date || "TBA"}
-                      </p>
-                      {drive.alternate_dates && (
-                        <p className="muted">Alternates: {drive.alternate_dates}</p>
-                      )}
-                      {drive.placement_note && (
-                        <p className="warn-note">Placement note: {drive.placement_note}</p>
-                      )}
+              {drives.map((drive) => {
+                const rf = roundForms[drive.id] || {
+                  current_round: drive.current_round || "registration",
+                  date: "",
+                  time: "",
+                  venue: "",
+                  meet_link: "",
+                  notes: "",
+                };
+                return (
+                  <article key={drive.id} className="soft-card">
+                    <div className="row-card" style={{ padding: 0, border: "none" }}>
+                      <div>
+                        <strong>{drive.title}</strong>
+                        <p className="muted">
+                          {drive.role} · Preferred: {formatDriveWhen(drive)}
+                        </p>
+                        <p className="muted">
+                          Current round:{" "}
+                          <strong>{drive.current_round_label || roundLabel(drive.current_round)}</strong>
+                        </p>
+                        {drive.placement_note && (
+                          <p className="warn-note">Placement note: {drive.placement_note}</p>
+                        )}
+                      </div>
+                      <span className={`status-pill status-${drive.status}`}>{drive.status}</span>
                     </div>
-                    <span className={`status-pill status-${drive.status}`}>{drive.status}</span>
-                  </div>
 
-                  {drive.status === "needs_reschedule" && (
-                    <div className="cta-row" style={{ marginTop: "0.8rem" }}>
-                      <input
-                        type="date"
-                        value={rescheduleDate}
-                        onChange={(e) => setRescheduleDate(e.target.value)}
-                      />
-                      <button className="btn primary" onClick={() => proposeNewDate(drive.id)}>
-                        Propose new date
+                    {drive.status === "needs_reschedule" && (
+                      <div className="cta-row" style={{ marginTop: "0.6rem" }}>
+                        <input
+                          type="date"
+                          value={rescheduleDate}
+                          onChange={(e) => setRescheduleDate(e.target.value)}
+                        />
+                        <input
+                          type="time"
+                          value={rescheduleTime}
+                          onChange={(e) => setRescheduleTime(e.target.value)}
+                        />
+                        <button className="btn primary" onClick={() => proposeNewDate(drive.id)}>
+                          Propose new slot
+                        </button>
+                      </div>
+                    )}
+
+                    {drive.status === "scheduled" && (
+                      <div className="round-box">
+                        <div className="grid-form compact-form">
+                          <label>
+                            Round
+                            <select
+                              value={rf.current_round}
+                              onChange={(e) =>
+                                updateRoundForm(drive.id, "current_round", e.target.value)
+                              }
+                            >
+                              {DRIVE_ROUNDS.map((r) => (
+                                <option key={r.key} value={r.key}>
+                                  {r.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Round date
+                            <input
+                              type="date"
+                              value={rf.date}
+                              onChange={(e) => updateRoundForm(drive.id, "date", e.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Round time
+                            <input
+                              type="time"
+                              value={rf.time}
+                              onChange={(e) => updateRoundForm(drive.id, "time", e.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Venue
+                            <input
+                              value={rf.venue}
+                              onChange={(e) => updateRoundForm(drive.id, "venue", e.target.value)}
+                              placeholder="Hall A / Online"
+                            />
+                          </label>
+                          <label className="full">
+                            Meet link
+                            <input
+                              value={rf.meet_link}
+                              onChange={(e) =>
+                                updateRoundForm(drive.id, "meet_link", e.target.value)
+                              }
+                              placeholder="https://..."
+                            />
+                          </label>
+                        </div>
+                        <div className="cta-row" style={{ marginTop: "0.55rem" }}>
+                          <button
+                            className="btn primary"
+                            type="button"
+                            onClick={() => saveRound(drive.id)}
+                          >
+                            Save round
+                          </button>
+                          <button
+                            className="btn ghost"
+                            type="button"
+                            onClick={() => advanceIntoRound(drive.id)}
+                          >
+                            Move shortlisted → in round
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="cta-row" style={{ marginTop: "0.6rem" }}>
+                      <button className="btn ghost" onClick={() => viewApplicants(drive.id)}>
+                        Applicants
                       </button>
                     </div>
-                  )}
-
-                  <div className="cta-row" style={{ marginTop: "0.8rem" }}>
-                    <button className="btn ghost" onClick={() => viewApplicants(drive.id)}>
-                      Applicants
-                    </button>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
               {!drives.length && <p className="muted empty-note">No drives posted yet.</p>}
+            </div>
+          </>
+        )}
+
+        {tab === "calendar" && (
+          <>
+            <div className="panel-head">
+              <h3>Campus calendar</h3>
+              <p className="muted">
+                Plan around your drives, other companies, and exam/blocked days
+              </p>
+            </div>
+            <div className="calendar-layout">
+              <MonthCalendar
+                markedDates={markedDriveDates}
+                blockedDates={blockedDateMap}
+                selectedDate={calendarDay}
+                onSelectDate={setCalendarDay}
+                legend="Green = campus drives"
+              />
+              <div className="calendar-day-panel">
+                <h4>{calendarDay ? `Schedule · ${calendarDay}` : "Select a day"}</h4>
+                {calendarDay && (
+                  <div className="card-list">
+                    {blocksOnDay.map((block) => (
+                      <article key={`b-${block.id}`} className="soft-card">
+                        <strong>{block.title}</strong>
+                        <p className="muted">
+                          Blocked / exam
+                          {block.reason ? ` · ${block.reason}` : ""}
+                        </p>
+                      </article>
+                    ))}
+                    {drivesOnDay.map((drive) => (
+                      <article key={drive.id} className="soft-card">
+                        <div className="row-card" style={{ padding: 0, border: "none" }}>
+                          <div>
+                            <strong>
+                              {drive.is_mine ? "Your drive · " : ""}
+                              {drive.title}
+                            </strong>
+                            <p className="muted">
+                              {drive.is_mine
+                                ? "You"
+                                : drive.company_name || "Another company"}{" "}
+                              · {drive.drive_time || "Time TBA"} · {drive.status}
+                            </p>
+                            <p className="muted">
+                              Branches: {drive.eligible_branches || "All"}
+                            </p>
+                          </div>
+                          <span className={`status-pill status-${drive.status}`}>
+                            {drive.status}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
+                    {!drivesOnDay.length && !blocksOnDay.length && (
+                      <p className="muted empty-note">Free day — no drives or blocks.</p>
+                    )}
+                  </div>
+                )}
+                {!calendarDay && (
+                  <p className="muted">
+                    Tap a marked day to see clashes before proposing a drive.
+                  </p>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -193,7 +471,9 @@ export default function CompanyDashboard() {
           <>
             <div className="panel-head">
               <h3>Propose a drive</h3>
-              <p className="muted">Suggest preferred/alternate dates for placement review</p>
+              <p className="muted">
+                Check Calendar first, then set a preferred date and time.
+              </p>
             </div>
             <form className="grid-form surface-form" onSubmit={createDrive}>
               <label>
@@ -220,6 +500,10 @@ export default function CompanyDashboard() {
               <label>
                 Preferred date
                 <input value={form.drive_date} onChange={update("drive_date")} type="date" />
+              </label>
+              <label>
+                Preferred time
+                <input value={form.drive_time} onChange={update("drive_time")} type="time" />
               </label>
               <label>
                 Deadline
@@ -263,7 +547,9 @@ export default function CompanyDashboard() {
               <h3>Applicants</h3>
               <p className="muted">
                 {selectedDrive
-                  ? `Reviewing: ${selectedTitle || "selected drive"}`
+                  ? `${selectedTitle || "Drive"} · Round: ${
+                      drives.find((d) => d.id === selectedDrive)?.current_round_label || "—"
+                    }`
                   : "Pick a drive from My drives first"}
               </p>
             </div>
@@ -284,12 +570,18 @@ export default function CompanyDashboard() {
                       <div>
                         <strong>{app.student?.full_name}</strong>
                         <p className="muted">
-                          {app.student?.branch} · CGPA {app.student?.cgpa} · {app.status}
+                          {app.student?.branch} · CGPA {app.student?.cgpa}
+                          {app.last_round_cleared_label
+                            ? ` · Cleared: ${app.last_round_cleared_label}`
+                            : ""}
+                          {app.attended_current_round ? " · Attended" : ""}
                         </p>
                       </div>
-                      <span className={`status-pill status-${app.status}`}>{app.status}</span>
+                      <span className={`status-pill status-${app.status}`}>
+                        {app.status_label || app.status}
+                      </span>
                     </div>
-                    <div className="cta-row" style={{ marginTop: "0.8rem" }}>
+                    <div className="sheet-actions-row" style={{ marginTop: "0.55rem" }}>
                       {app.student?.has_resume && (
                         <button
                           className="btn ghost"
@@ -304,18 +596,46 @@ export default function CompanyDashboard() {
                           Resume
                         </button>
                       )}
-                      <button className="btn ghost" onClick={() => setStatus(app.id, "shortlisted")}>
-                        Shortlist
+                      {APP_STATUSES.map((s) => (
+                        <button
+                          key={s.key}
+                          className={`btn ghost${app.status === s.key ? " is-active-btn" : ""}`}
+                          type="button"
+                          onClick={() => setStatus(app.id, s.key)}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() =>
+                          setStatus(app.id, {
+                            status: app.status,
+                            attended: !app.attended_current_round,
+                          })
+                        }
+                      >
+                        {app.attended_current_round ? "Unmark attendance" : "Mark attendance"}
                       </button>
-                      <button className="btn ghost" onClick={() => setStatus(app.id, "selected")}>
-                        Select
-                      </button>
-                      <button className="btn ghost" onClick={() => setStatus(app.id, "rejected")}>
-                        Reject
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() => {
+                          const drive = drives.find((d) => d.id === selectedDrive);
+                          const round = drive?.current_round;
+                          if (!round || round === "registration") return;
+                          setStatus(app.id, {
+                            status: app.status === "rejected" ? "in_round" : app.status,
+                            last_round_cleared: round,
+                          });
+                        }}
+                      >
+                        Cleared this round
                       </button>
                     </div>
                     {app.status === "selected" && (
-                      <div className="cta-row" style={{ marginTop: "0.75rem" }}>
+                      <div className="cta-row" style={{ marginTop: "0.55rem" }}>
                         {app.has_offer_letter ? (
                           <button
                             className="btn primary"

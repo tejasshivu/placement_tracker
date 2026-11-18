@@ -30,6 +30,7 @@ def create_app(config_class=Config):
 
         db.create_all()
         _ensure_sqlite_columns()
+        _normalize_branch_casing()
 
     return app
 
@@ -63,6 +64,17 @@ def _ensure_sqlite_columns():
             conn.exec_driver_sql("ALTER TABLE drives ADD COLUMN placement_note TEXT")
         if "alternate_dates" not in drive_cols:
             conn.exec_driver_sql("ALTER TABLE drives ADD COLUMN alternate_dates VARCHAR(255)")
+        if "drive_time" not in drive_cols:
+            conn.exec_driver_sql("ALTER TABLE drives ADD COLUMN drive_time VARCHAR(5)")
+        if "current_round" not in drive_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE drives ADD COLUMN current_round VARCHAR(30) DEFAULT 'registration'"
+            )
+            conn.exec_driver_sql(
+                "UPDATE drives SET current_round = 'registration' WHERE current_round IS NULL"
+            )
+        if "round_details" not in drive_cols:
+            conn.exec_driver_sql("ALTER TABLE drives ADD COLUMN round_details TEXT")
 
         app_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(applications)").fetchall()}
         if "offer_letter_path" not in app_cols:
@@ -71,8 +83,46 @@ def _ensure_sqlite_columns():
             conn.exec_driver_sql(
                 "ALTER TABLE applications ADD COLUMN offer_original_name VARCHAR(255)"
             )
+        if "last_round_cleared" not in app_cols:
+            conn.exec_driver_sql("ALTER TABLE applications ADD COLUMN last_round_cleared VARCHAR(30)")
+        if "round_attendance" not in app_cols:
+            conn.exec_driver_sql("ALTER TABLE applications ADD COLUMN round_attendance TEXT")
 
         conn.commit()
+
+
+def _normalize_branch_casing():
+    """Collapse mixed-case branch values (CSE vs cse) to uppercase."""
+    from utils import normalize_branch, normalize_branches_csv
+
+    dirty = False
+    with db.engine.connect() as conn:
+        students = conn.exec_driver_sql(
+            "SELECT id, branch FROM student_profiles WHERE branch IS NOT NULL"
+        ).fetchall()
+        for row_id, branch in students:
+            fixed = normalize_branch(branch)
+            if fixed != branch:
+                conn.exec_driver_sql(
+                    "UPDATE student_profiles SET branch = ? WHERE id = ?",
+                    (fixed, row_id),
+                )
+                dirty = True
+
+        drives = conn.exec_driver_sql(
+            "SELECT id, eligible_branches FROM drives WHERE eligible_branches IS NOT NULL"
+        ).fetchall()
+        for row_id, branches in drives:
+            fixed = normalize_branches_csv(branches)
+            if fixed != branches:
+                conn.exec_driver_sql(
+                    "UPDATE drives SET eligible_branches = ? WHERE id = ?",
+                    (fixed, row_id),
+                )
+                dirty = True
+
+        if dirty:
+            conn.commit()
 
 
 app = create_app()

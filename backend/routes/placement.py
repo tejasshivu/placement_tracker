@@ -11,6 +11,32 @@ from utils import role_required
 placement_bp = Blueprint("placement", __name__, url_prefix="/api/placement")
 
 
+def _company_row(company: CompanyProfile):
+    return {
+        **company.to_dict(),
+        "email": company.user.email if company.user else None,
+        "is_approved": bool(company.user.is_approved) if company.user else False,
+        "drives_count": Drive.query.filter_by(company_id=company.id).count(),
+        "registered_at": (
+            company.user.created_at.isoformat()
+            if company.user and company.user.created_at
+            else None
+        ),
+    }
+
+
+def _company_detail(company: CompanyProfile):
+    drives = (
+        Drive.query.filter_by(company_id=company.id)
+        .order_by(Drive.drive_date.asc(), Drive.drive_time.asc(), Drive.created_at.desc())
+        .all()
+    )
+    return {
+        **_company_row(company),
+        "drives": [d.to_dict() for d in drives],
+    }
+
+
 @placement_bp.get("/companies/pending")
 @jwt_required()
 @role_required("placement")
@@ -18,14 +44,31 @@ def pending_companies():
     companies = (
         CompanyProfile.query.join(User)
         .filter(User.role == "company", User.is_approved.is_(False))
+        .order_by(CompanyProfile.company_name.asc())
         .all()
     )
-    return jsonify(
-        [
-            {**c.to_dict(), "email": c.user.email, "is_approved": c.user.is_approved}
-            for c in companies
-        ]
+    return jsonify([_company_row(c) for c in companies])
+
+
+@placement_bp.get("/companies/approved")
+@jwt_required()
+@role_required("placement")
+def approved_companies():
+    companies = (
+        CompanyProfile.query.join(User)
+        .filter(User.role == "company", User.is_approved.is_(True))
+        .order_by(CompanyProfile.company_name.asc())
+        .all()
     )
+    return jsonify([_company_row(c) for c in companies])
+
+
+@placement_bp.get("/companies/<int:company_id>")
+@jwt_required()
+@role_required("placement")
+def get_company(company_id):
+    company = CompanyProfile.query.get_or_404(company_id)
+    return jsonify(_company_detail(company))
 
 
 @placement_bp.post("/companies/<int:company_id>/approve")
@@ -35,7 +78,7 @@ def approve_company(company_id):
     company = CompanyProfile.query.get_or_404(company_id)
     company.user.is_approved = True
     db.session.commit()
-    return jsonify({"message": "Company approved", "company": company.to_dict()})
+    return jsonify({"message": "Company approved", "company": _company_row(company)})
 
 
 def _student_payload(student: StudentProfile):
@@ -66,13 +109,15 @@ def list_students():
         .all()
     )
     # Keep list light; full details are fetched on demand
+    from utils import normalize_branch
+
     return jsonify(
         [
             {
                 "id": s.id,
                 "full_name": s.full_name,
                 "email": s.user.email,
-                "branch": s.branch,
+                "branch": normalize_branch(s.branch),
                 "has_resume": bool(s.resume_path),
                 "applications_count": Application.query.filter_by(student_id=s.id).count(),
             }
@@ -96,14 +141,27 @@ def update_student(student_id):
     student = StudentProfile.query.get_or_404(student_id)
     data = request.get_json() or {}
 
-    for field in ("full_name", "branch", "phone"):
+    from utils import normalize_branch
+
+    for field in ("full_name", "phone"):
         if field in data and data[field] is not None:
             setattr(student, field, data[field])
+    if "branch" in data and data["branch"] is not None:
+        student.branch = normalize_branch(data["branch"])
 
-    if "year" in data:
-        student.year = int(data["year"]) if data["year"] not in (None, "") else None
+    semester_value = data["semester"] if "semester" in data else data.get("year")
+    if "semester" in data or "year" in data:
+        student.semester = (
+            int(semester_value) if semester_value not in (None, "") else None
+        )
     if "cgpa" in data:
-        student.cgpa = float(data["cgpa"]) if data["cgpa"] not in (None, "") else None
+        if data["cgpa"] in (None, ""):
+            student.cgpa = None
+        else:
+            cgpa = float(data["cgpa"])
+            if cgpa < 0 or cgpa > 10:
+                return jsonify({"error": "CGPA must be between 0 and 10"}), 400
+            student.cgpa = cgpa
 
     if "email" in data and data["email"]:
         new_email = data["email"].lower().strip()
@@ -143,7 +201,14 @@ def reports():
         .all()
     )
     by_status = {status: count for status, count in status_rows}
-    for key in ("applied", "shortlisted", "selected", "rejected"):
+    for key in (
+        "applied",
+        "shortlisted",
+        "in_round",
+        "waitlisted",
+        "selected",
+        "rejected",
+    ):
         by_status.setdefault(key, 0)
 
     company_rows = (
@@ -172,15 +237,17 @@ def reports():
         for row in company_rows
     ]
 
+    # Group case-insensitively so CSE / cse / Cse count as one branch
+    branch_key = func.upper(func.trim(StudentProfile.branch))
     branch_rows = (
-        db.session.query(StudentProfile.branch, func.count(Application.id))
+        db.session.query(branch_key, func.count(Application.id))
         .join(Application, Application.student_id == StudentProfile.id)
-        .group_by(StudentProfile.branch)
+        .group_by(branch_key)
         .order_by(func.count(Application.id).desc())
         .all()
     )
     by_branch = [
-        {"branch": branch or "Unknown", "applications": count}
+        {"branch": (branch or "Unknown"), "applications": count}
         for branch, count in branch_rows
     ]
 

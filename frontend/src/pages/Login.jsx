@@ -28,7 +28,7 @@ export default function Login() {
   return (
     <div className="login-stage">
       <section className="login-panel brand-panel">
-        <p className="login-kicker">CampusHire</p>
+        <p className="login-kicker">Ascendia</p>
         <h1>Sign in to your placement portal</h1>
         <p>
           Students track drives. Companies hire. Placement teams run everything from one

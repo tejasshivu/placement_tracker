@@ -1,4 +1,4 @@
-# CampusHire — College Placement Web App
+# Ascendia — College Placement Web App
 
 Flask API + React (Vite) portal for **students**, **placement team**, and **companies**.
 

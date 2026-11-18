@@ -51,7 +51,8 @@ class StudentProfile(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
     full_name = db.Column(db.String(120), nullable=False)
     branch = db.Column(db.String(80))
-    year = db.Column(db.Integer)
+    # DB column remains "year"; API/UI use semester
+    semester = db.Column("year", db.Integer)
     cgpa = db.Column(db.Float)
     phone = db.Column(db.String(20))
     resume_path = db.Column(db.String(255))
@@ -61,12 +62,14 @@ class StudentProfile(db.Model):
     applications = db.relationship("Application", back_populates="student", cascade="all, delete-orphan")
 
     def to_dict(self):
+        from utils import normalize_branch
+
         return {
             "id": self.id,
             "user_id": self.user_id,
             "full_name": self.full_name,
-            "branch": self.branch,
-            "year": self.year,
+            "branch": normalize_branch(self.branch),
+            "semester": self.semester,
             "cgpa": self.cgpa,
             "phone": self.phone,
             "has_resume": bool(self.resume_path),
@@ -108,6 +111,7 @@ class Drive(db.Model):
     package_lpa = db.Column(db.Float)
     location = db.Column(db.String(120))
     drive_date = db.Column(db.Date)
+    drive_time = db.Column(db.String(5))  # HH:MM — allows multiple drives same day
     deadline = db.Column(db.Date)
     alternate_dates = db.Column(db.String(255))  # comma-separated YYYY-MM-DD
     min_cgpa = db.Column(db.Float, default=0.0)
@@ -115,6 +119,10 @@ class Drive(db.Model):
     description = db.Column(db.Text)
     # proposed | needs_reschedule | scheduled | completed | cancelled
     status = db.Column(db.String(30), default="proposed")
+    # registration | aptitude | technical | gd | hr | offer | completed
+    current_round = db.Column(db.String(30), default="registration")
+    # JSON: { "aptitude": { "date", "time", "venue", "meet_link", "notes" }, ... }
+    round_details = db.Column(db.Text)
     placement_note = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=utcnow)
@@ -123,6 +131,10 @@ class Drive(db.Model):
     applications = db.relationship("Application", back_populates="drive", cascade="all, delete-orphan")
 
     def to_dict(self, include_conflicts=False):
+        from rounds import parse_round_details, round_label
+
+        round_key = self.current_round or "registration"
+        details = parse_round_details(self.round_details)
         payload = {
             "id": self.id,
             "company_id": self.company_id,
@@ -132,14 +144,22 @@ class Drive(db.Model):
             "package_lpa": self.package_lpa,
             "location": self.location,
             "drive_date": self.drive_date.isoformat() if self.drive_date else None,
+            "drive_time": self.drive_time,
             "deadline": self.deadline.isoformat() if self.deadline else None,
             "alternate_dates": self.alternate_dates,
             "min_cgpa": self.min_cgpa,
             "eligible_branches": self.eligible_branches,
             "description": self.description,
             "status": self.status or "proposed",
+            "current_round": round_key,
+            "current_round_label": round_label(round_key),
+            "round_details": details,
+            "current_round_info": details.get(round_key) or {},
             "placement_note": self.placement_note,
             "is_active": self.is_active,
+            "accepting_applications": (
+                (self.status or "") == "scheduled" and round_key == "registration"
+            ),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if include_conflicts:
@@ -155,7 +175,11 @@ class Application(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("student_profiles.id"), nullable=False)
     drive_id = db.Column(db.Integer, db.ForeignKey("drives.id"), nullable=False)
-    status = db.Column(db.String(20), default="applied")  # applied|shortlisted|rejected|selected
+    # applied|shortlisted|in_round|waitlisted|rejected|selected
+    status = db.Column(db.String(20), default="applied")
+    last_round_cleared = db.Column(db.String(30))
+    # JSON: { "aptitude": true, "technical": false }
+    round_attendance = db.Column(db.Text)
     applied_at = db.Column(db.DateTime, default=utcnow)
     offer_letter_path = db.Column(db.String(255))
     offer_original_name = db.Column(db.String(255))
@@ -168,11 +192,30 @@ class Application(db.Model):
     )
 
     def to_dict(self):
+        from rounds import (
+            APP_STATUS_LABELS,
+            parse_attendance,
+            round_label,
+            student_next_step,
+        )
+
+        attendance = parse_attendance(self.round_attendance)
+        current_round = self.drive.current_round if self.drive else None
         return {
             "id": self.id,
             "student_id": self.student_id,
             "drive_id": self.drive_id,
             "status": self.status,
+            "status_label": APP_STATUS_LABELS.get(self.status, self.status),
+            "last_round_cleared": self.last_round_cleared,
+            "last_round_cleared_label": (
+                round_label(self.last_round_cleared) if self.last_round_cleared else None
+            ),
+            "round_attendance": attendance,
+            "attended_current_round": bool(
+                current_round and attendance.get(current_round)
+            ),
+            "next_step": student_next_step(self.drive, self) if self.drive else None,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
             "has_offer_letter": bool(self.offer_letter_path),
             "offer_original_name": self.offer_original_name,

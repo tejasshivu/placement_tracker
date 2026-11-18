@@ -3,6 +3,9 @@ import api from "../api";
 import { useAuth } from "../AuthContext";
 import { downloadPdf, downloadResume } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import { COURSES, SEMESTERS } from "../constants/courses";
+import { roundLabel } from "../constants/rounds";
+import { formatDriveWhen } from "../utils/driveWhen";
 
 export default function StudentDashboard() {
   const { user, setUser } = useAuth();
@@ -13,7 +16,7 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState({
     full_name: "",
     branch: "",
-    year: "",
+    semester: "",
     cgpa: "",
     phone: "",
     has_resume: false,
@@ -38,7 +41,7 @@ export default function StudentDashboard() {
       setProfile({
         full_name: me.data.profile.full_name || "",
         branch: me.data.profile.branch || "",
-        year: me.data.profile.year ?? "",
+        semester: me.data.profile.semester ?? "",
         cgpa: me.data.profile.cgpa ?? "",
         phone: me.data.profile.phone || "",
         has_resume: !!me.data.profile.has_resume,
@@ -57,18 +60,23 @@ export default function StudentDashboard() {
     e.preventDefault();
     setMessage("");
     setError("");
+    const cgpa = profile.cgpa === "" ? null : Number(profile.cgpa);
+    if (cgpa !== null && (cgpa < 0 || cgpa > 10)) {
+      setError("CGPA must be between 0 and 10");
+      return;
+    }
     try {
       const { data } = await api.patch("/students/me", {
         full_name: profile.full_name,
         branch: profile.branch,
-        year: profile.year,
-        cgpa: profile.cgpa,
+        semester: profile.semester === "" ? null : Number(profile.semester),
+        cgpa,
         phone: profile.phone,
       });
       setProfile({
         ...profile,
         ...data,
-        year: data.year ?? "",
+        semester: data.semester ?? "",
         cgpa: data.cgpa ?? "",
       });
       setMessage("Profile saved");
@@ -191,28 +199,57 @@ export default function StudentDashboard() {
               <p className="muted">Browse and apply to open opportunities</p>
             </div>
             <div className="card-list">
-              {drives.map((drive) => (
-                <article key={drive.id} className="soft-card row-card">
-                  <div>
-                    <strong>{drive.title}</strong>
-                    <p>
-                      {drive.company_name} · {drive.role || "Role TBA"} ·{" "}
-                      {drive.package_lpa ? `${drive.package_lpa} LPA` : "Package TBA"}
-                    </p>
-                    <p className="muted">
-                      Drive: {drive.drive_date || "TBA"} · Min CGPA: {drive.min_cgpa ?? "-"} ·
-                      Branches: {drive.eligible_branches || "All"}
-                    </p>
-                  </div>
-                  <button
-                    className="btn primary"
-                    disabled={appliedIds.has(drive.id)}
-                    onClick={() => apply(drive.id)}
-                  >
-                    {appliedIds.has(drive.id) ? "Applied" : "Apply"}
-                  </button>
-                </article>
-              ))}
+              {drives.map((drive) => {
+                const canApply =
+                  !appliedIds.has(drive.id) && drive.accepting_applications !== false;
+                const info = drive.current_round_info || {};
+                return (
+                  <article key={drive.id} className="soft-card">
+                    <div className="row-card" style={{ padding: 0, border: "none" }}>
+                      <div>
+                        <strong>{drive.title}</strong>
+                        <p>
+                          {drive.company_name} · {drive.role || "Role TBA"} ·{" "}
+                          {drive.package_lpa ? `${drive.package_lpa} LPA` : "Package TBA"}
+                        </p>
+                        <p className="muted">
+                          Drive: {formatDriveWhen(drive)} · Min CGPA: {drive.min_cgpa ?? "-"} ·
+                          Branches: {drive.eligible_branches || "All"}
+                        </p>
+                        <p className="muted">
+                          Round:{" "}
+                          <strong>
+                            {drive.current_round_label || roundLabel(drive.current_round)}
+                          </strong>
+                          {info.date || info.time
+                            ? ` · ${[info.date, info.time].filter(Boolean).join(" · ")}`
+                            : ""}
+                          {info.venue ? ` · ${info.venue}` : ""}
+                        </p>
+                        {info.meet_link && (
+                          <p className="muted">
+                            Link:{" "}
+                            <a href={info.meet_link} target="_blank" rel="noreferrer">
+                              Join
+                            </a>
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        className="btn primary"
+                        disabled={!canApply}
+                        onClick={() => apply(drive.id)}
+                      >
+                        {appliedIds.has(drive.id)
+                          ? "Applied"
+                          : drive.accepting_applications === false
+                            ? "Registration closed"
+                            : "Apply"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
               {!drives.length && <p className="muted empty-note">No drives yet.</p>}
             </div>
           </>
@@ -230,9 +267,22 @@ export default function StudentDashboard() {
                   <div className="row-card" style={{ padding: 0, border: "none" }}>
                     <div>
                       <strong>{app.drive?.title}</strong>
-                      <p className="muted">{app.drive?.company_name || "Company"}</p>
+                      <p className="muted">
+                        {app.drive?.company_name || "Company"} · {formatDriveWhen(app.drive)}
+                      </p>
+                      <p className="muted">
+                        Drive round:{" "}
+                        {app.drive?.current_round_label ||
+                          roundLabel(app.drive?.current_round)}
+                        {app.last_round_cleared_label
+                          ? ` · Cleared: ${app.last_round_cleared_label}`
+                          : ""}
+                      </p>
+                      {app.next_step && <p className="next-step">{app.next_step}</p>}
                     </div>
-                    <span className={`status-pill status-${app.status}`}>{app.status}</span>
+                    <span className={`status-pill status-${app.status}`}>
+                      {app.status_label || app.status}
+                    </span>
                   </div>
                   {app.status === "selected" && (
                     <div className="cta-row" style={{ marginTop: "0.8rem" }}>
@@ -275,12 +325,29 @@ export default function StudentDashboard() {
                 <input value={profile.full_name} onChange={updateField("full_name")} required />
               </label>
               <label>
-                Branch
-                <input value={profile.branch} onChange={updateField("branch")} placeholder="CSE" />
+                Course / Branch
+                <select value={profile.branch} onChange={updateField("branch")}>
+                  <option value="">Select course</option>
+                  {COURSES.map((course) => (
+                    <option key={course} value={course}>
+                      {course}
+                    </option>
+                  ))}
+                  {profile.branch && !COURSES.includes(profile.branch) && (
+                    <option value={profile.branch}>{profile.branch}</option>
+                  )}
+                </select>
               </label>
               <label>
-                Year
-                <input value={profile.year} onChange={updateField("year")} type="number" />
+                Semester
+                <select value={profile.semester} onChange={updateField("semester")}>
+                  <option value="">Select semester</option>
+                  {SEMESTERS.map((sem) => (
+                    <option key={sem} value={sem}>
+                      Semester {sem}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 CGPA
@@ -289,6 +356,8 @@ export default function StudentDashboard() {
                   onChange={updateField("cgpa")}
                   type="number"
                   step="0.01"
+                  min="0"
+                  max="10"
                 />
               </label>
               <label className="full">

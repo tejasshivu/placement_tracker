@@ -32,7 +32,7 @@ export default function RegisterCompany() {
   return (
     <div className="login-stage">
       <section className="login-panel brand-panel">
-        <p className="login-kicker">CampusHire</p>
+        <p className="login-kicker">Ascendia</p>
         <h1>Hire from campus</h1>
         <p>Request access, propose drives, and manage applicants with the placement team.</p>
       </section>

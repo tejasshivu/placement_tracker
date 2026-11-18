@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import Application, Drive, User
+from rounds import APP_STATUSES, DRIVE_ROUND_KEYS, dump_attendance, parse_attendance
 from utils import role_required
 
 applications_bp = Blueprint("applications", __name__, url_prefix="/api/applications")
@@ -30,6 +31,17 @@ def apply():
 
     if drive.status != "scheduled":
         return jsonify({"error": "Drive is not open for applications yet"}), 400
+
+    current_round = drive.current_round or "registration"
+    if current_round != "registration":
+        return jsonify(
+            {
+                "error": (
+                    f"Registration closed — drive is in "
+                    f"{current_round.replace('_', ' ')} round"
+                )
+            }
+        ), 400
 
     if not student.resume_path:
         return jsonify({"error": "Upload your resume before applying"}), 400
@@ -89,10 +101,30 @@ def update_status(application_id):
 
     data = request.get_json() or {}
     status = data.get("status")
-    if status not in {"applied", "shortlisted", "rejected", "selected"}:
-        return jsonify({"error": "Invalid status"}), 400
+    if status not in APP_STATUSES:
+        return jsonify({"error": f"Invalid status. Use one of: {', '.join(sorted(APP_STATUSES))}"}), 400
 
     app_row.status = status
+
+    if "last_round_cleared" in data:
+        cleared = data.get("last_round_cleared")
+        if cleared in (None, ""):
+            app_row.last_round_cleared = None
+        elif cleared not in DRIVE_ROUND_KEYS:
+            return jsonify({"error": "Invalid last_round_cleared"}), 400
+        else:
+            app_row.last_round_cleared = cleared
+
+    if "attended" in data:
+        round_key = data.get("attendance_round") or (
+            app_row.drive.current_round if app_row.drive else None
+        )
+        if not round_key or round_key not in DRIVE_ROUND_KEYS:
+            return jsonify({"error": "attendance_round is required"}), 400
+        attendance = parse_attendance(app_row.round_attendance)
+        attendance[round_key] = bool(data.get("attended"))
+        app_row.round_attendance = dump_attendance(attendance)
+
     db.session.commit()
     return jsonify(app_row.to_dict())
 

@@ -43,7 +43,7 @@ export default function ResetPassword() {
     <div className="login-stage single">
       <section className="login-panel form-panel">
         <h2>Set a new password</h2>
-        <p className="muted">Choose a new password for your CampusHire account.</p>
+        <p className="muted">Choose a new password for your Ascendia account.</p>
 
         <form onSubmit={onSubmit} className="login-form">
           <label>
