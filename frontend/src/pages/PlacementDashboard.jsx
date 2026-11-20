@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import api from "../api";
 import { downloadPdf } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import EmptyState from "../components/EmptyState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import MonthCalendar from "../components/MonthCalendar";
+import StatusPill from "../components/StatusPill";
 import { COURSES, SEMESTERS } from "../constants/courses";
 import { DRIVE_ROUNDS, roundLabel } from "../constants/rounds";
 import { formatDriveWhen } from "../utils/driveWhen";
+import { driveStatusLabel } from "../utils/statusLabels";
 
 const emptyReport = {
   summary: {
@@ -60,6 +64,9 @@ export default function PlacementDashboard() {
   const [scheduleDates, setScheduleDates] = useState({});
   const [scheduleTimes, setScheduleTimes] = useState({});
   const [calendarDay, setCalendarDay] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [driveQuery, setDriveQuery] = useState("");
+  const [companyQuery, setCompanyQuery] = useState("");
 
   const load = async () => {
     const [p, approved, d, a, r, st, b] = await Promise.all([
@@ -81,7 +88,10 @@ export default function PlacementDashboard() {
   };
 
   useEffect(() => {
-    load().catch(() => setMessage("Could not load placement data"));
+    setLoading(true);
+    load()
+      .catch(() => setMessage("Could not load placement data"))
+      .finally(() => setLoading(false));
   }, []);
 
   const approve = async (companyId) => {
@@ -299,6 +309,33 @@ export default function PlacementDashboard() {
   const pendingSchedule = drives.filter((d) =>
     ["proposed", "needs_reschedule"].includes(d.status)
   );
+  const driveQ = driveQuery.trim().toLowerCase();
+  const filteredDrives = drives.filter((drive) => {
+    if (!driveQ) return true;
+    return [
+      drive.title,
+      drive.company_name,
+      drive.role,
+      drive.status,
+      drive.current_round_label,
+      drive.eligible_branches,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(driveQ));
+  });
+  const companyQ = companyQuery.trim().toLowerCase();
+  const filteredPending = pending.filter((c) => {
+    if (!companyQ) return true;
+    return [c.company_name, c.email, c.website]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(companyQ));
+  });
+  const filteredApproved = approvedCompanies.filter((c) => {
+    if (!companyQ) return true;
+    return [c.company_name, c.email, c.website, c.hr_contact]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(companyQ));
+  });
 
   const markedDriveDates = useMemo(() => {
     const map = {};
@@ -358,6 +395,11 @@ export default function PlacementDashboard() {
 
       <DashboardTabs tabs={tabs} active={tab} onChange={setTab} />
 
+      {loading ? (
+        <section className="tab-panel">
+          <LoadingSkeleton rows={5} />
+        </section>
+      ) : (
       <section className="tab-panel" key={tab}>
         {tab === "scheduling" && (
           <>
@@ -365,11 +407,19 @@ export default function PlacementDashboard() {
               <h3>Drive scheduling</h3>
               <p className="muted">Edit slot → Approve / Reschedule / Cancel</p>
             </div>
-            <div className="table-wrap sheet-wrap">
+            <label className="full search-field">
+              Search drives
+              <input
+                value={driveQuery}
+                onChange={(e) => setDriveQuery(e.target.value)}
+                placeholder="Company, title, round, or status"
+              />
+            </label>
+            <div className="table-wrap sheet-wrap sheet-desktop">
               <table className="report-table sheet-table sheet-compact">
                 <thead>
                   <tr>
-                    <th>Company / Drive</th>
+                    <th className="sheet-sticky-col">Company / Drive</th>
                     <th>Branches</th>
                     <th>Status</th>
                     <th>Round</th>
@@ -380,12 +430,12 @@ export default function PlacementDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {drives.map((drive) => {
+                  {filteredDrives.map((drive) => {
                     const conflictCount = drive.conflicts?.length || 0;
                     const hasHigh = (drive.conflicts || []).some((c) => c.severity === "high");
                     return (
                       <tr key={drive.id}>
-                        <td>
+                        <td className="sheet-sticky-col">
                           <strong>{drive.company_name || "—"}</strong>
                           <div className="sheet-sub">
                             {drive.title}
@@ -398,9 +448,7 @@ export default function PlacementDashboard() {
                         </td>
                         <td>{drive.eligible_branches || "All"}</td>
                         <td>
-                          <span className={`status-pill status-${drive.status}`}>
-                            {drive.status}
-                          </span>
+                          <StatusPill status={drive.status} />
                           {conflictCount > 0 && (
                             <div
                               className={hasHigh ? "error sheet-conflict" : "muted sheet-conflict"}
@@ -490,15 +538,109 @@ export default function PlacementDashboard() {
                       </tr>
                     );
                   })}
-                  {!drives.length && (
+                  {!filteredDrives.length && (
                     <tr>
                       <td colSpan={8} className="muted">
-                        No drives to schedule.
+                        {drives.length ? "No matching drives." : "No drives to schedule."}
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="sheet-mobile-cards">
+              {filteredDrives.map((drive) => (
+                <article key={`m-${drive.id}`} className="soft-card sheet-mobile-card">
+                  <div className="row-card" style={{ padding: 0, border: "none" }}>
+                    <div>
+                      <strong>{drive.company_name || "Company"}</strong>
+                      <p className="muted">{drive.title}</p>
+                    </div>
+                    <StatusPill status={drive.status} />
+                  </div>
+                  <label className="full" style={{ marginTop: "0.5rem" }}>
+                    Round
+                    <select
+                      value={drive.current_round || "registration"}
+                      onChange={(e) => setDriveRound(drive.id, e.target.value)}
+                    >
+                      {DRIVE_ROUNDS.map((r) => (
+                        <option key={r.key} value={r.key}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="grid-form compact-form" style={{ marginTop: "0.45rem" }}>
+                    <label>
+                      Date
+                      <input
+                        type="date"
+                        value={scheduleDates[drive.id] ?? drive.drive_date ?? ""}
+                        onChange={(e) =>
+                          setScheduleDates({ ...scheduleDates, [drive.id]: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Time
+                      <input
+                        type="time"
+                        value={scheduleTimes[drive.id] ?? drive.drive_time ?? ""}
+                        onChange={(e) =>
+                          setScheduleTimes({ ...scheduleTimes, [drive.id]: e.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label className="full" style={{ marginTop: "0.45rem" }}>
+                    Note
+                    <input
+                      value={scheduleNotes[drive.id] ?? drive.placement_note ?? ""}
+                      onChange={(e) =>
+                        setScheduleNotes({ ...scheduleNotes, [drive.id]: e.target.value })
+                      }
+                      placeholder="Note…"
+                    />
+                  </label>
+                  <div className="sheet-actions-row" style={{ marginTop: "0.55rem" }}>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      onClick={() => scheduleAction(drive.id, "approve")}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => scheduleAction(drive.id, "request_reschedule")}
+                    >
+                      Reschedule
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => scheduleAction(drive.id, "cancel")}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!filteredDrives.length && (
+                <EmptyState
+                  title={drives.length ? "No matching drives" : "No drives to schedule"}
+                  message={
+                    drives.length
+                      ? "Try another search term."
+                      : "When companies propose drives, they will appear here for approval."
+                  }
+                  actionLabel={drives.length ? "Clear search" : undefined}
+                  onAction={drives.length ? () => setDriveQuery("") : undefined}
+                />
+              )}
             </div>
           </>
         )}
@@ -524,7 +666,7 @@ export default function PlacementDashboard() {
                         <strong>{drive.title}</strong>
                         <p className="muted">
                           {drive.company_name} · {drive.drive_time || "Time TBA"} ·{" "}
-                          {drive.status}
+                          {driveStatusLabel(drive.status)}
                         </p>
                         <p className="muted">Branches: {drive.eligible_branches || "All"}</p>
                       </article>
@@ -802,10 +944,18 @@ export default function PlacementDashboard() {
               <h3>Companies</h3>
               <p className="muted">Approve new partners and track who already has access</p>
             </div>
+            <label className="full search-field">
+              Search companies
+              <input
+                value={companyQuery}
+                onChange={(e) => setCompanyQuery(e.target.value)}
+                placeholder="Name, email, website, or HR contact"
+              />
+            </label>
 
             <h4 className="section-label">Pending approval</h4>
             <div className="card-list">
-              {pending.map((c) => (
+              {filteredPending.map((c) => (
                 <article key={c.id} className="soft-card row-card">
                   <button
                     type="button"
@@ -828,11 +978,16 @@ export default function PlacementDashboard() {
                   </div>
                 </article>
               ))}
-              {!pending.length && <p className="muted empty-note">No pending companies.</p>}
+              {!filteredPending.length && (
+                <p className="muted empty-note">
+                  {pending.length ? "No matching pending companies." : "No pending companies."}
+                </p>
+              )}
             </div>
 
             <h4 className="section-label" style={{ marginTop: "1.4rem" }}>
-              Approved companies ({approvedCompanies.length})
+              Approved companies ({filteredApproved.length}
+              {companyQ ? ` of ${approvedCompanies.length}` : ""})
             </h4>
             <div className="table-wrap sheet-wrap">
               <table className="report-table sheet-table sheet-compact">
@@ -848,7 +1003,7 @@ export default function PlacementDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {approvedCompanies.map((c) => (
+                  {filteredApproved.map((c) => (
                     <tr key={c.id}>
                       <td>
                         <button
@@ -877,10 +1032,12 @@ export default function PlacementDashboard() {
                       </td>
                     </tr>
                   ))}
-                  {!approvedCompanies.length && (
+                  {!filteredApproved.length && (
                     <tr>
                       <td colSpan={7} className="muted">
-                        No approved companies yet.
+                        {approvedCompanies.length
+                          ? "No matching approved companies."
+                          : "No approved companies yet."}
                       </td>
                     </tr>
                   )}
@@ -898,6 +1055,14 @@ export default function PlacementDashboard() {
                 Overview sheet — use Scheduling to approve, reschedule, or cancel
               </p>
             </div>
+            <label className="full search-field">
+              Search drives
+              <input
+                value={driveQuery}
+                onChange={(e) => setDriveQuery(e.target.value)}
+                placeholder="Company, title, round, or status"
+              />
+            </label>
             <div className="table-wrap sheet-wrap">
               <table className="report-table sheet-table">
                 <thead>
@@ -914,7 +1079,7 @@ export default function PlacementDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {drives.map((drive) => (
+                  {filteredDrives.map((drive) => (
                     <tr key={drive.id}>
                       <td>{drive.company_name || "—"}</td>
                       <td>
@@ -939,16 +1104,14 @@ export default function PlacementDashboard() {
                       <td>{drive.eligible_branches || "All"}</td>
                       <td>{drive.package_lpa != null ? `${drive.package_lpa} LPA` : "—"}</td>
                       <td>
-                        <span className={`status-pill status-${drive.status}`}>
-                          {drive.status}
-                        </span>
+                        <StatusPill status={drive.status} />
                       </td>
                     </tr>
                   ))}
-                  {!drives.length && (
+                  {!filteredDrives.length && (
                     <tr>
                       <td colSpan={9} className="muted">
-                        No drives yet.
+                        {drives.length ? "No matching drives." : "No drives yet."}
                       </td>
                     </tr>
                   )}
@@ -1000,6 +1163,7 @@ export default function PlacementDashboard() {
           </>
         )}
       </section>
+      )}
 
       {selectedCompany && (
         <div className="modal-backdrop" onClick={closeCompany}>

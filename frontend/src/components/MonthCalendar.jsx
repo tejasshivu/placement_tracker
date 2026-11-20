@@ -18,21 +18,17 @@ function monthLabel(year, monthIndex) {
 }
 
 /**
- * Simple month calendar.
- * @param {{
- *   markedDates?: Record<string, number>,
- *   blockedDates?: Record<string, boolean>,
- *   selectedDate?: string|null,
- *   onSelectDate?: (iso: string)=>void,
- *   legend?: string,
- * }} props
+ * Month calendar with optional mine/other/blocked day marks.
  */
 export default function MonthCalendar({
   markedDates = {},
+  mineDates = {},
+  otherDates = {},
   blockedDates = {},
   selectedDate = null,
   onSelectDate,
   legend = "Marked days have one or more drives",
+  showKindLegend = false,
 }) {
   const today = new Date();
   const [cursor, setCursor] = useState({
@@ -51,19 +47,24 @@ export default function MonthCalendar({
     }
     for (let day = 1; day <= daysInMonth; day += 1) {
       const iso = toKey(cursor.year, cursor.month, day);
+      const mine = !!mineDates[iso] || false;
+      const other = !!otherDates[iso] || false;
+      const count = markedDates[iso] || (mine || other ? 1 : 0);
       list.push({
         type: "day",
         key: iso,
         day,
         iso,
-        count: markedDates[iso] || 0,
+        count,
+        isMine: mine,
+        isOther: other,
         isBlocked: !!blockedDates[iso],
         isToday: iso === toKey(today.getFullYear(), today.getMonth(), today.getDate()),
         isSelected: iso === selectedDate,
       });
     }
     return list;
-  }, [cursor, markedDates, blockedDates, selectedDate]);
+  }, [cursor, markedDates, mineDates, otherDates, blockedDates, selectedDate]);
 
   const prev = () => {
     setCursor((c) =>
@@ -104,6 +105,8 @@ export default function MonthCalendar({
               className={[
                 "month-cal-cell",
                 cell.count ? "has-drive" : "",
+                cell.isMine ? "is-mine" : "",
+                cell.isOther ? "is-other" : "",
                 cell.isBlocked ? "is-blocked" : "",
                 cell.isToday ? "is-today" : "",
                 cell.isSelected ? "is-selected" : "",
@@ -115,7 +118,9 @@ export default function MonthCalendar({
               <span className="day-num">{cell.day}</span>
               {(cell.count > 0 || cell.isBlocked) && (
                 <span className="day-marks">
-                  {cell.count > 0 && (
+                  {cell.isMine && <span className="day-dot mine-dot" title="Your drive" />}
+                  {cell.isOther && <span className="day-dot other-dot" title="Other company" />}
+                  {!cell.isMine && !cell.isOther && cell.count > 0 && (
                     <span className="day-dot" title={`${cell.count} drive(s)`} />
                   )}
                   {cell.isBlocked && (
@@ -127,15 +132,25 @@ export default function MonthCalendar({
           )
         )}
       </div>
-      <p className="muted month-cal-legend">
-        <span className="day-dot inline-dot" /> {legend}
-        {Object.keys(blockedDates).length > 0 && (
-          <>
-            {" · "}
-            <span className="day-dot inline-dot blocked-dot" /> Exam / blocked
-          </>
-        )}
-      </p>
+      {showKindLegend ? (
+        <p className="muted month-cal-legend">
+          <span className="day-dot inline-dot mine-dot" /> Your drives
+          {" · "}
+          <span className="day-dot inline-dot other-dot" /> Other companies
+          {" · "}
+          <span className="day-dot inline-dot blocked-dot" /> Exam / blocked
+        </p>
+      ) : (
+        <p className="muted month-cal-legend">
+          <span className="day-dot inline-dot" /> {legend}
+          {Object.keys(blockedDates).length > 0 && (
+            <>
+              {" · "}
+              <span className="day-dot inline-dot blocked-dot" /> Exam / blocked
+            </>
+          )}
+        </p>
+      )}
     </div>
   );
 }

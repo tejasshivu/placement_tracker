@@ -58,15 +58,20 @@ def campus_calendar():
 @drives_bp.get("")
 @jwt_required(optional=True)
 def list_drives():
+    from eligibility import drive_eligibility
+    from models import Application
+
     verify_jwt_in_request(optional=True)
     claims = get_jwt() or {}
     role = claims.get("role")
+    user = None
+    if get_jwt_identity() is not None:
+        user = User.query.get(int(get_jwt_identity()))
 
     query = Drive.query.filter_by(is_active=True)
     if role == "student" or not role:
         query = query.filter(Drive.status == "scheduled")
     elif role == "company":
-        user = User.query.get(int(get_jwt_identity()))
         if user and user.company_profile:
             query = query.filter(Drive.company_id == user.company_profile.id)
 
@@ -76,6 +81,25 @@ def list_drives():
         Drive.created_at.desc(),
     ).all()
     include_conflicts = role == "placement"
+
+    # Students only see drives they are eligible for (CGPA + branch),
+    # plus any drive they already applied to.
+    if role == "student" and user and user.student_profile:
+        student = user.student_profile
+        applied_ids = {
+            row.drive_id
+            for row in Application.query.filter_by(student_id=student.id).all()
+        }
+        payload = []
+        for drive in rows:
+            eligible, reasons = drive_eligibility(student, drive)
+            item = drive.to_dict(include_conflicts=include_conflicts)
+            item["eligible"] = eligible
+            item["eligibility_reasons"] = reasons
+            if eligible or drive.id in applied_ids:
+                payload.append(item)
+        return jsonify(payload)
+
     return jsonify([d.to_dict(include_conflicts=include_conflicts) for d in rows])
 
 

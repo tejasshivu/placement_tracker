@@ -46,13 +46,11 @@ def apply():
     if not student.resume_path:
         return jsonify({"error": "Upload your resume before applying"}), 400
 
-    if drive.min_cgpa and student.cgpa is not None and student.cgpa < drive.min_cgpa:
-        return jsonify({"error": f"Minimum CGPA required: {drive.min_cgpa}"}), 400
+    from eligibility import drive_eligibility
 
-    if drive.eligible_branches and student.branch:
-        allowed = [b.strip().lower() for b in drive.eligible_branches.split(",")]
-        if student.branch.strip().lower() not in allowed:
-            return jsonify({"error": "Your branch is not eligible for this drive"}), 400
+    eligible, reasons = drive_eligibility(student, drive)
+    if not eligible:
+        return jsonify({"error": reasons[0] if reasons else "Not eligible for this drive"}), 400
 
     existing = Application.query.filter_by(student_id=student.id, drive_id=drive.id).first()
     if existing:

@@ -11,9 +11,9 @@ export const DRIVE_ROUNDS = [
 export const APP_STATUSES = [
   { key: "applied", label: "Applied" },
   { key: "shortlisted", label: "Shortlisted" },
-  { key: "in_round", label: "In current round" },
+  { key: "in_round", label: "In interview round" },
   { key: "waitlisted", label: "Waitlisted" },
-  { key: "rejected", label: "Rejected" },
+  { key: "rejected", label: "Not selected" },
   { key: "selected", label: "Selected" },
 ];
 

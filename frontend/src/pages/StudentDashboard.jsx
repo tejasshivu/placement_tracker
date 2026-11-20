@@ -3,6 +3,9 @@ import api from "../api";
 import { useAuth } from "../AuthContext";
 import { downloadPdf, downloadResume } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import EmptyState from "../components/EmptyState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
+import StatusPill from "../components/StatusPill";
 import { COURSES, SEMESTERS } from "../constants/courses";
 import { roundLabel } from "../constants/rounds";
 import { formatDriveWhen } from "../utils/driveWhen";
@@ -25,6 +28,8 @@ export default function StudentDashboard() {
   const [resumeFile, setResumeFile] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [driveQuery, setDriveQuery] = useState("");
 
   const load = async () => {
     const [d, a, me, notices] = await Promise.all([
@@ -51,7 +56,10 @@ export default function StudentDashboard() {
   };
 
   useEffect(() => {
-    load().catch(() => setError("Could not load data"));
+    setLoading(true);
+    load()
+      .catch(() => setError("Could not load data"))
+      .finally(() => setLoading(false));
   }, []);
 
   const updateField = (key) => (e) => setProfile({ ...profile, [key]: e.target.value });
@@ -79,9 +87,8 @@ export default function StudentDashboard() {
         semester: data.semester ?? "",
         cgpa: data.cgpa ?? "",
       });
-      setMessage("Profile saved");
-      const me = await api.get("/auth/me");
-      setUser(me.data);
+      setMessage("Profile saved — eligible drives refreshed");
+      await load();
     } catch (err) {
       setError(err.response?.data?.error || "Could not save profile");
     }
@@ -129,6 +136,40 @@ export default function StudentDashboard() {
   };
 
   const appliedIds = new Set(applications.map((a) => a.drive_id));
+  const driveQ = driveQuery.trim().toLowerCase();
+  const visibleDrives = drives.filter((drive) => {
+    if (!driveQ) return true;
+    return [drive.title, drive.company_name, drive.role, drive.eligible_branches]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(driveQ));
+  });
+  const checklist = [
+    {
+      id: "branch",
+      label: "Set your course / branch",
+      done: Boolean(profile.branch),
+      action: () => setTab("profile"),
+    },
+    {
+      id: "cgpa",
+      label: "Add your CGPA",
+      done: profile.cgpa !== "" && profile.cgpa != null,
+      action: () => setTab("profile"),
+    },
+    {
+      id: "resume",
+      label: "Upload your resume (PDF)",
+      done: Boolean(profile.has_resume),
+      action: () => setTab("profile"),
+    },
+    {
+      id: "apply",
+      label: "Apply to an eligible drive",
+      done: applications.length > 0,
+      action: () => setTab("drives"),
+    },
+  ];
+  const checklistDone = checklist.filter((item) => item.done).length;
   const tabs = [
     { id: "overview", label: "Overview", count: announcements.length },
     { id: "drives", label: "Drives", count: drives.length },
@@ -168,10 +209,35 @@ export default function StudentDashboard() {
 
       <DashboardTabs tabs={tabs} active={tab} onChange={setTab} />
 
+      {loading ? (
+        <section className="tab-panel">
+          <LoadingSkeleton rows={4} />
+        </section>
+      ) : (
       <section className="tab-panel" key={tab}>
         {tab === "overview" && (
           <>
             <div className="panel-head">
+              <h3>Get started</h3>
+              <p className="muted">
+                {checklistDone}/{checklist.length} steps done — finish these to apply faster
+              </p>
+            </div>
+            <div className="checklist">
+              {checklist.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`checklist-item ${item.done ? "is-done" : ""}`}
+                  onClick={item.action}
+                >
+                  <span className="check-mark">{item.done ? "✓" : ""}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="panel-head" style={{ marginTop: "1.2rem" }}>
               <h3>Announcements</h3>
               <p className="muted">Latest notes from the placement team</p>
             </div>
@@ -186,7 +252,10 @@ export default function StudentDashboard() {
                 </article>
               ))}
               {!announcements.length && (
-                <p className="muted empty-note">No announcements yet.</p>
+                <EmptyState
+                  title="No announcements yet"
+                  message="When placement posts updates or round changes, they’ll show up here."
+                />
               )}
             </div>
           </>
@@ -195,13 +264,30 @@ export default function StudentDashboard() {
         {tab === "drives" && (
           <>
             <div className="panel-head">
-              <h3>Upcoming drives</h3>
-              <p className="muted">Browse and apply to open opportunities</p>
+              <h3>Eligible drives</h3>
+              <p className="muted">
+                Filtered by your branch and CGPA
+                {profile.branch || profile.cgpa !== ""
+                  ? ` · ${profile.branch || "No branch"} · CGPA ${
+                      profile.cgpa !== "" ? profile.cgpa : "—"
+                    }`
+                  : " · complete Profile to unlock more drives"}
+              </p>
             </div>
+            <label className="full search-field">
+              Search drives
+              <input
+                value={driveQuery}
+                onChange={(e) => setDriveQuery(e.target.value)}
+                placeholder="Company, role, or branch"
+              />
+            </label>
             <div className="card-list">
-              {drives.map((drive) => {
+              {visibleDrives.map((drive) => {
                 const canApply =
-                  !appliedIds.has(drive.id) && drive.accepting_applications !== false;
+                  !appliedIds.has(drive.id) &&
+                  drive.accepting_applications !== false &&
+                  drive.eligible !== false;
                 const info = drive.current_round_info || {};
                 return (
                   <article key={drive.id} className="soft-card">
@@ -234,6 +320,9 @@ export default function StudentDashboard() {
                             </a>
                           </p>
                         )}
+                        {drive.eligible === false && drive.eligibility_reasons?.length > 0 && (
+                          <p className="warn-note">{drive.eligibility_reasons[0]}</p>
+                        )}
                       </div>
                       <button
                         className="btn primary"
@@ -244,13 +333,28 @@ export default function StudentDashboard() {
                           ? "Applied"
                           : drive.accepting_applications === false
                             ? "Registration closed"
-                            : "Apply"}
+                            : drive.eligible === false
+                              ? "Not eligible"
+                              : "Apply"}
                       </button>
                     </div>
                   </article>
                 );
               })}
-              {!drives.length && <p className="muted empty-note">No drives yet.</p>}
+              {!visibleDrives.length && (
+                <EmptyState
+                  title={drives.length ? "No matching drives" : "No eligible drives right now"}
+                  message={
+                    drives.length
+                      ? "Try a different search, or clear the filter."
+                      : "Update your branch and CGPA in Profile, or check back when new drives open."
+                  }
+                  actionLabel={drives.length ? "Clear search" : "Go to Profile"}
+                  onAction={
+                    drives.length ? () => setDriveQuery("") : () => setTab("profile")
+                  }
+                />
+              )}
             </div>
           </>
         )}
@@ -280,9 +384,11 @@ export default function StudentDashboard() {
                       </p>
                       {app.next_step && <p className="next-step">{app.next_step}</p>}
                     </div>
-                    <span className={`status-pill status-${app.status}`}>
-                      {app.status_label || app.status}
-                    </span>
+                    <StatusPill
+                      kind="app"
+                      status={app.status}
+                      label={app.status_label}
+                    />
                   </div>
                   {app.status === "selected" && (
                     <div className="cta-row" style={{ marginTop: "0.8rem" }}>
@@ -307,7 +413,12 @@ export default function StudentDashboard() {
                 </article>
               ))}
               {!applications.length && (
-                <p className="muted empty-note">No applications yet.</p>
+                <EmptyState
+                  title="No applications yet"
+                  message="Browse eligible drives and apply when your profile is ready."
+                  actionLabel="View drives"
+                  onAction={() => setTab("drives")}
+                />
               )}
             </div>
           </>
@@ -410,6 +521,7 @@ export default function StudentDashboard() {
           </>
         )}
       </section>
+      )}
     </div>
   );
 }

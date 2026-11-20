@@ -3,9 +3,13 @@ import api from "../api";
 import { useAuth } from "../AuthContext";
 import { downloadPdf } from "../downloadResume";
 import DashboardTabs from "../components/DashboardTabs";
+import EmptyState from "../components/EmptyState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import MonthCalendar from "../components/MonthCalendar";
+import StatusPill from "../components/StatusPill";
 import { APP_STATUSES, DRIVE_ROUNDS, roundLabel } from "../constants/rounds";
 import { formatDriveWhen } from "../utils/driveWhen";
+import { driveStatusLabel } from "../utils/statusLabels";
 
 const emptyDrive = {
   title: "",
@@ -36,6 +40,9 @@ export default function CompanyDashboard() {
   const [blockedDates, setBlockedDates] = useState([]);
   const [calendarDay, setCalendarDay] = useState(null);
   const [roundForms, setRoundForms] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [driveQuery, setDriveQuery] = useState("");
+  const [applicantQuery, setApplicantQuery] = useState("");
 
   const loadDrives = async () => {
     const { data } = await api.get("/drives");
@@ -62,9 +69,10 @@ export default function CompanyDashboard() {
   };
 
   useEffect(() => {
-    Promise.all([loadDrives(), loadCalendar()]).catch(() =>
-      setMessage("Could not load company data")
-    );
+    setLoading(true);
+    Promise.all([loadDrives(), loadCalendar()])
+      .catch(() => setMessage("Could not load company data"))
+      .finally(() => setLoading(false));
   }, []);
 
   const update = (key) => (e) => setForm({ ...form, [key]: e.target.value });
@@ -132,6 +140,33 @@ export default function CompanyDashboard() {
     }));
   };
 
+  const changeRound = (drive, nextRound) => {
+    setRoundForms((prev) => {
+      const current = prev[drive.id] || {
+        current_round: drive.current_round || "registration",
+        date: "",
+        time: "",
+        venue: "",
+        meet_link: "",
+        notes: "",
+      };
+      const info = drive.round_details?.[nextRound] || {};
+      return {
+        ...prev,
+        [drive.id]: {
+          ...current,
+          current_round: nextRound,
+          // Prefer saved round details, else fall back to drive slot
+          date: info.date || current.date || drive.drive_date || "",
+          time: info.time || current.time || drive.drive_time || "",
+          venue: info.venue || current.venue || "",
+          meet_link: info.meet_link || current.meet_link || "",
+          notes: info.notes || current.notes || "",
+        },
+      };
+    });
+  };
+
   const saveRound = async (driveId) => {
     const form = roundForms[driveId];
     if (!form) return;
@@ -185,12 +220,42 @@ export default function CompanyDashboard() {
   };
 
   const selectedTitle = drives.find((d) => d.id === selectedDrive)?.title;
+  const driveQ = driveQuery.trim().toLowerCase();
+  const visibleDrives = drives.filter((drive) => {
+    if (!driveQ) return true;
+    return [drive.title, drive.role, drive.status, drive.current_round_label]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(driveQ));
+  });
+  const applicantQ = applicantQuery.trim().toLowerCase();
+  const visibleApplicants = applicants.filter((app) => {
+    if (!applicantQ) return true;
+    return [app.student?.full_name, app.student?.branch, app.status, app.status_label]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(applicantQ));
+  });
 
   const markedDriveDates = useMemo(() => {
     const map = {};
     campusDrives.forEach((drive) => {
       if (!drive.drive_date) return;
       map[drive.drive_date] = (map[drive.drive_date] || 0) + 1;
+    });
+    return map;
+  }, [campusDrives]);
+
+  const mineDates = useMemo(() => {
+    const map = {};
+    campusDrives.forEach((drive) => {
+      if (drive.is_mine && drive.drive_date) map[drive.drive_date] = true;
+    });
+    return map;
+  }, [campusDrives]);
+
+  const otherDates = useMemo(() => {
+    const map = {};
+    campusDrives.forEach((drive) => {
+      if (!drive.is_mine && drive.drive_date) map[drive.drive_date] = true;
     });
     return map;
   }, [campusDrives]);
@@ -257,6 +322,11 @@ export default function CompanyDashboard() {
 
       <DashboardTabs tabs={tabs} active={tab} onChange={setTab} />
 
+      {loading ? (
+        <section className="tab-panel">
+          <LoadingSkeleton rows={4} />
+        </section>
+      ) : (
       <section className="tab-panel" key={tab}>
         {tab === "drives" && (
           <>
@@ -267,8 +337,16 @@ export default function CompanyDashboard() {
                 approves before students can apply.
               </p>
             </div>
+            <label className="full search-field">
+              Search drives
+              <input
+                value={driveQuery}
+                onChange={(e) => setDriveQuery(e.target.value)}
+                placeholder="Title, role, or status"
+              />
+            </label>
             <div className="card-list">
-              {drives.map((drive) => {
+              {visibleDrives.map((drive) => {
                 const rf = roundForms[drive.id] || {
                   current_round: drive.current_round || "registration",
                   date: "",
@@ -293,7 +371,7 @@ export default function CompanyDashboard() {
                           <p className="warn-note">Placement note: {drive.placement_note}</p>
                         )}
                       </div>
-                      <span className={`status-pill status-${drive.status}`}>{drive.status}</span>
+                      <StatusPill status={drive.status} />
                     </div>
 
                     {drive.status === "needs_reschedule" && (
@@ -321,9 +399,7 @@ export default function CompanyDashboard() {
                             Round
                             <select
                               value={rf.current_round}
-                              onChange={(e) =>
-                                updateRoundForm(drive.id, "current_round", e.target.value)
-                              }
+                              onChange={(e) => changeRound(drive, e.target.value)}
                             >
                               {DRIVE_ROUNDS.map((r) => (
                                 <option key={r.key} value={r.key}>
@@ -394,7 +470,18 @@ export default function CompanyDashboard() {
                   </article>
                 );
               })}
-              {!drives.length && <p className="muted empty-note">No drives posted yet.</p>}
+              {!visibleDrives.length && (
+                <EmptyState
+                  title={drives.length ? "No matching drives" : "No drives yet"}
+                  message={
+                    drives.length
+                      ? "Try another search term."
+                      : "Propose a drive with a preferred date and time to get started."
+                  }
+                  actionLabel={drives.length ? "Clear search" : "Propose drive"}
+                  onAction={drives.length ? () => setDriveQuery("") : () => setTab("post")}
+                />
+              )}
             </div>
           </>
         )}
@@ -410,10 +497,12 @@ export default function CompanyDashboard() {
             <div className="calendar-layout">
               <MonthCalendar
                 markedDates={markedDriveDates}
+                mineDates={mineDates}
+                otherDates={otherDates}
                 blockedDates={blockedDateMap}
                 selectedDate={calendarDay}
                 onSelectDate={setCalendarDay}
-                legend="Green = campus drives"
+                showKindLegend
               />
               <div className="calendar-day-panel">
                 <h4>{calendarDay ? `Schedule · ${calendarDay}` : "Select a day"}</h4>
@@ -440,20 +529,27 @@ export default function CompanyDashboard() {
                               {drive.is_mine
                                 ? "You"
                                 : drive.company_name || "Another company"}{" "}
-                              · {drive.drive_time || "Time TBA"} · {drive.status}
+                              · {drive.drive_time || "Time TBA"} ·{" "}
+                              {driveStatusLabel(drive.status)}
                             </p>
                             <p className="muted">
                               Branches: {drive.eligible_branches || "All"}
                             </p>
                           </div>
-                          <span className={`status-pill status-${drive.status}`}>
-                            {drive.status}
-                          </span>
+                          <StatusPill status={drive.status} />
                         </div>
                       </article>
                     ))}
                     {!drivesOnDay.length && !blocksOnDay.length && (
-                      <p className="muted empty-note">Free day — no drives or blocks.</p>
+                      <EmptyState
+                        title="Free day"
+                        message="No drives or exam blocks on this date — a good slot to propose."
+                        actionLabel="Propose drive"
+                        onAction={() => {
+                          setForm((f) => ({ ...f, drive_date: calendarDay }));
+                          setTab("post");
+                        }}
+                      />
                     )}
                   </div>
                 )}
@@ -564,7 +660,15 @@ export default function CompanyDashboard() {
             )}
             {selectedDrive && (
               <div className="card-list">
-                {applicants.map((app) => (
+                <label className="full search-field">
+                  Search applicants
+                  <input
+                    value={applicantQuery}
+                    onChange={(e) => setApplicantQuery(e.target.value)}
+                    placeholder="Name, branch, or status"
+                  />
+                </label>
+                {visibleApplicants.map((app) => (
                   <article key={app.id} className="soft-card">
                     <div className="row-card" style={{ padding: 0, border: "none" }}>
                       <div>
@@ -577,9 +681,7 @@ export default function CompanyDashboard() {
                           {app.attended_current_round ? " · Attended" : ""}
                         </p>
                       </div>
-                      <span className={`status-pill status-${app.status}`}>
-                        {app.status_label || app.status}
-                      </span>
+                      <StatusPill kind="app" status={app.status} label={app.status_label} />
                     </div>
                     <div className="sheet-actions-row" style={{ marginTop: "0.55rem" }}>
                       {app.student?.has_resume && (
@@ -669,12 +771,24 @@ export default function CompanyDashboard() {
                     )}
                   </article>
                 ))}
-                {!applicants.length && <p className="muted empty-note">No applicants yet.</p>}
+                {!visibleApplicants.length && (
+                  <EmptyState
+                    title={applicants.length ? "No matching applicants" : "No applicants yet"}
+                    message={
+                      applicants.length
+                        ? "Try another search term."
+                        : "Once students apply to this drive, you can shortlist and move them through rounds here."
+                    }
+                    actionLabel={applicants.length ? "Clear search" : undefined}
+                    onAction={applicants.length ? () => setApplicantQuery("") : undefined}
+                  />
+                )}
               </div>
             )}
           </>
         )}
       </section>
+      )}
     </div>
   );
 }

@@ -29,9 +29,9 @@ APP_STATUSES = {
 APP_STATUS_LABELS = {
     "applied": "Applied",
     "shortlisted": "Shortlisted",
-    "in_round": "In current round",
+    "in_round": "In interview round",
     "waitlisted": "Waitlisted",
-    "rejected": "Rejected",
+    "rejected": "Not selected",
     "selected": "Selected",
 }
 

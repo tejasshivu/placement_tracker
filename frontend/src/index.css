@@ -542,7 +542,6 @@ a {
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 700;
-  text-transform: capitalize;
   background: rgba(20, 35, 28, 0.08);
   color: var(--ink);
 }
@@ -604,6 +603,127 @@ a {
   padding: 1rem 0.2rem;
 }
 
+.empty-state {
+  padding: 1rem 0.15rem 0.4rem;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: start;
+}
+
+.empty-state .btn {
+  margin-top: 0.15rem;
+}
+
+.checklist {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.checklist-item.is-done {
+  background: rgba(47, 122, 79, 0.1);
+  border-color: rgba(47, 122, 79, 0.28);
+}
+
+.check-mark {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.checklist-item.is-done .check-mark {
+  background: var(--brand, #2f7a4f);
+  border-color: var(--brand, #2f7a4f);
+  color: #fff;
+}
+
+.sheet-sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 4px 0 8px rgba(20, 35, 28, 0.04);
+}
+
+.sheet-table thead .sheet-sticky-col {
+  background: #eef5f0;
+  z-index: 3;
+}
+
+.sheet-table tbody tr:nth-child(even) .sheet-sticky-col {
+  background: #f7faf8;
+}
+
+.sheet-table tbody tr:hover .sheet-sticky-col {
+  background: #eaf4ee;
+}
+
+.sheet-mobile-cards {
+  display: none;
+  gap: 0.75rem;
+}
+
+.sheet-mobile-card label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+}
+
+.month-cal-cell.is-mine {
+  background: rgba(34, 120, 72, 0.14);
+  border-color: rgba(34, 120, 72, 0.35);
+}
+
+.month-cal-cell.is-other {
+  background: rgba(40, 90, 160, 0.12);
+  border-color: rgba(40, 90, 160, 0.3);
+}
+
+.month-cal-cell.is-mine.is-other {
+  background: linear-gradient(
+    135deg,
+    rgba(34, 120, 72, 0.16),
+    rgba(40, 90, 160, 0.14)
+  );
+}
+
+.mine-dot {
+  background: #2f7a4f;
+}
+
+.other-dot {
+  background: #2f5f9f;
+}
+
+@media (max-width: 860px) {
+  .sheet-desktop {
+    display: none;
+  }
+
+  .sheet-mobile-cards {
+    display: grid;
+  }
+}
+
 .warn-note {
   margin: 0.4rem 0 0;
   color: #9a4e18;
@@ -642,6 +762,53 @@ a {
 .search-field {
   max-width: 360px;
   margin-bottom: 0.9rem;
+}
+
+.loading-skeleton {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.skeleton-card {
+  padding: 1rem 1.1rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(20, 35, 28, 0.08);
+}
+
+.skeleton-line {
+  height: 0.65rem;
+  border-radius: 999px;
+  margin-bottom: 0.55rem;
+  background: linear-gradient(
+    90deg,
+    rgba(20, 35, 28, 0.08) 0%,
+    rgba(20, 35, 28, 0.14) 45%,
+    rgba(20, 35, 28, 0.08) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.skeleton-line.wide {
+  width: 72%;
+}
+
+.skeleton-line.short {
+  width: 38%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 button.text-link {
