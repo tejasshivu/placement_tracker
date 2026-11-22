@@ -11,9 +11,11 @@ def _database_uri():
     uri = (os.getenv("DATABASE_URL") or "").strip()
     if not uri:
         uri = f"sqlite:///{os.path.join(BASE_DIR, 'placement.db')}"
-    # Render/Heroku sometimes give postgres:// — SQLAlchemy wants postgresql://
+    # Render gives postgres://… — use psycopg2 driver (we install psycopg2-binary)
     if uri.startswith("postgres://"):
-        uri = uri.replace("postgres://", "postgresql://", 1)
+        uri = "postgresql+psycopg2://" + uri[len("postgres://") :]
+    elif uri.startswith("postgresql://") and "+psycopg" not in uri.split("://", 1)[0]:
+        uri = "postgresql+psycopg2://" + uri[len("postgresql://") :]
     return uri
 
 
