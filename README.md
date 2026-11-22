@@ -41,13 +41,16 @@ npm run dev
 
 App: http://127.0.0.1:5173
 
-## Build order (next steps)
+## Deploy (Render API + Vercel frontend)
 
-1. ~~Resume upload for students~~ ✅  
-2. Drive search & filters  
-3. Email notifications  
-4. Reports/export for placement team  
-5. Deploy (Render/Railway + Vercel)
+1. Push this repo to GitHub.
+2. **Render**: New → Blueprint → select repo (`render.yaml`), or Web Service with root `backend`, start `python seed.py && gunicorn -b 0.0.0.0:$PORT app:app`. Add free Postgres and set `DATABASE_URL`. Set `FRONTEND_ORIGIN` to your Vercel URL after step 3.
+3. **Vercel**: Import repo → Root Directory `frontend` → env `VITE_API_URL` = `https://YOUR-RENDER-SERVICE.onrender.com/api` → Deploy.
+4. Update Render `FRONTEND_ORIGIN` to `https://YOUR-APP.vercel.app` and redeploy API.
+
+Default placement login after seed: `placement@college.edu` / `placement123`
+
+**Note:** Resume/offer files on free Render use ephemeral disk — they can reset on redeploy. Postgres keeps your app data.
 
 ## Main API routes
 

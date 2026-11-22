@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api";
+import { parsePhone, phoneKeyDown, sanitizePhoneInput } from "../utils/phone";
 
 export default function RegisterCompany() {
   const navigate = useNavigate();
@@ -9,19 +10,39 @@ export default function RegisterCompany() {
     password: "",
     company_name: "",
     website: "",
+    hr_name: "",
     hr_contact: "",
     description: "",
   });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const update = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const update = (key) => (e) => {
+    if (key === "hr_contact") {
+      setForm({ ...form, hr_contact: sanitizePhoneInput(e.target.value) });
+      return;
+    }
+    setForm({ ...form, [key]: e.target.value });
+  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const phone = parsePhone(form.hr_contact);
+    if (!phone.ok) {
+      setError(phone.error);
+      return;
+    }
+    if (form.hr_contact && !form.hr_name.trim()) {
+      setError("Enter the HR contact person’s name");
+      return;
+    }
     try {
-      const { data } = await api.post("/auth/register/company", form);
+      const { data } = await api.post("/auth/register/company", {
+        ...form,
+        hr_name: form.hr_name.trim() || null,
+        hr_contact: phone.value,
+      });
       setMessage(data.message);
       setTimeout(() => navigate("/login"), 1200);
     } catch (err) {
@@ -46,7 +67,7 @@ export default function RegisterCompany() {
             <input value={form.company_name} onChange={update("company_name")} required />
           </label>
           <label>
-            Email
+            Login email
             <input value={form.email} onChange={update("email")} type="email" required />
           </label>
           <label>
@@ -58,8 +79,20 @@ export default function RegisterCompany() {
             <input value={form.website} onChange={update("website")} />
           </label>
           <label>
-            HR contact
-            <input value={form.hr_contact} onChange={update("hr_contact")} />
+            HR name
+            <input value={form.hr_name} onChange={update("hr_name")} />
+          </label>
+          <label>
+            HR mobile
+            <input
+              value={form.hr_contact}
+              onChange={update("hr_contact")}
+              onKeyDown={phoneKeyDown}
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              autoComplete="tel-national"
+            />
           </label>
           <label>
             Description

@@ -8,7 +8,9 @@ import LoadingSkeleton from "../components/LoadingSkeleton";
 import StatusPill from "../components/StatusPill";
 import { COURSES, SEMESTERS } from "../constants/courses";
 import { roundLabel } from "../constants/rounds";
+import { cgpaKeyDown, parseCgpa, sanitizeCgpaInput } from "../utils/cgpa";
 import { formatDriveWhen } from "../utils/driveWhen";
+import { parsePhone, phoneKeyDown, sanitizePhoneInput } from "../utils/phone";
 
 export default function StudentDashboard() {
   const { user, setUser } = useAuth();
@@ -62,15 +64,30 @@ export default function StudentDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const updateField = (key) => (e) => setProfile({ ...profile, [key]: e.target.value });
+  const updateField = (key) => (e) => {
+    if (key === "cgpa") {
+      setProfile({ ...profile, cgpa: sanitizeCgpaInput(e.target.value) });
+      return;
+    }
+    if (key === "phone") {
+      setProfile({ ...profile, phone: sanitizePhoneInput(e.target.value) });
+      return;
+    }
+    setProfile({ ...profile, [key]: e.target.value });
+  };
 
   const saveProfile = async (e) => {
     e.preventDefault();
     setMessage("");
     setError("");
-    const cgpa = profile.cgpa === "" ? null : Number(profile.cgpa);
-    if (cgpa !== null && (cgpa < 0 || cgpa > 10)) {
-      setError("CGPA must be between 0 and 10");
+    const parsed = parseCgpa(profile.cgpa);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
+    const phone = parsePhone(profile.phone);
+    if (!phone.ok) {
+      setError(phone.error);
       return;
     }
     try {
@@ -78,8 +95,8 @@ export default function StudentDashboard() {
         full_name: profile.full_name,
         branch: profile.branch,
         semester: profile.semester === "" ? null : Number(profile.semester),
-        cgpa,
-        phone: profile.phone,
+        cgpa: parsed.value,
+        phone: phone.value,
       });
       setProfile({
         ...profile,
@@ -114,7 +131,7 @@ export default function StudentDashboard() {
         resume_original_name: data.profile.resume_original_name,
       });
       setResumeFile(null);
-      setMessage("Resume uploaded");
+      setMessage(data.message || "Resume uploaded");
       const me = await api.get("/auth/me");
       setUser(me.data);
     } catch (err) {
@@ -143,33 +160,15 @@ export default function StudentDashboard() {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(driveQ));
   });
-  const checklist = [
-    {
-      id: "branch",
-      label: "Set your course / branch",
-      done: Boolean(profile.branch),
-      action: () => setTab("profile"),
-    },
-    {
-      id: "cgpa",
-      label: "Add your CGPA",
-      done: profile.cgpa !== "" && profile.cgpa != null,
-      action: () => setTab("profile"),
-    },
-    {
-      id: "resume",
-      label: "Upload your resume (PDF)",
-      done: Boolean(profile.has_resume),
-      action: () => setTab("profile"),
-    },
-    {
-      id: "apply",
-      label: "Apply to an eligible drive",
-      done: applications.length > 0,
-      action: () => setTab("drives"),
-    },
-  ];
-  const checklistDone = checklist.filter((item) => item.done).length;
+  const missingProfile = [];
+  if (!profile.branch) missingProfile.push("branch");
+  if (profile.cgpa === "" || profile.cgpa == null) missingProfile.push("CGPA");
+  if (!profile.has_resume) missingProfile.push("resume");
+  const profileWarn =
+    missingProfile.length > 0
+      ? `Add your ${missingProfile.join(", ")} in Profile to apply to drives.`
+      : null;
+
   const tabs = [
     { id: "overview", label: "Overview", count: announcements.length },
     { id: "drives", label: "Drives", count: drives.length },
@@ -217,38 +216,29 @@ export default function StudentDashboard() {
       <section className="tab-panel" key={tab}>
         {tab === "overview" && (
           <>
-            <div className="panel-head">
-              <h3>Get started</h3>
-              <p className="muted">
-                {checklistDone}/{checklist.length} steps done — finish these to apply faster
-              </p>
-            </div>
-            <div className="checklist">
-              {checklist.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`checklist-item ${item.done ? "is-done" : ""}`}
-                  onClick={item.action}
-                >
-                  <span className="check-mark">{item.done ? "✓" : ""}</span>
-                  <span>{item.label}</span>
+            {profileWarn && (
+              <p className="warn-note profile-warn-line">
+                {profileWarn}{" "}
+                <button type="button" className="text-link" onClick={() => setTab("profile")}>
+                  Open Profile
                 </button>
-              ))}
-            </div>
-
-            <div className="panel-head" style={{ marginTop: "1.2rem" }}>
+              </p>
+            )}
+            <div className="panel-head panel-head-tight">
               <h3>Announcements</h3>
-              <p className="muted">Latest notes from the placement team</p>
             </div>
-            <div className="card-list">
+            <div className="card-list announce-list-compact">
               {announcements.map((notice) => (
-                <article key={notice.id} className="soft-card">
-                  <strong>{notice.title}</strong>
-                  <p>{notice.body}</p>
-                  <p className="muted">
-                    {notice.created_at ? new Date(notice.created_at).toLocaleString() : ""}
-                  </p>
+                <article key={notice.id} className="announce-row">
+                  <div>
+                    <strong>{notice.title}</strong>
+                    <p>{notice.body}</p>
+                  </div>
+                  <span className="muted announce-meta">
+                    {notice.created_at
+                      ? new Date(notice.created_at).toLocaleDateString()
+                      : ""}
+                  </span>
                 </article>
               ))}
               {!announcements.length && (
@@ -263,16 +253,23 @@ export default function StudentDashboard() {
 
         {tab === "drives" && (
           <>
-            <div className="panel-head">
-              <h3>Eligible drives</h3>
-              <p className="muted">
-                Filtered by your branch and CGPA
-                {profile.branch || profile.cgpa !== ""
-                  ? ` · ${profile.branch || "No branch"} · CGPA ${
-                      profile.cgpa !== "" ? profile.cgpa : "—"
-                    }`
-                  : " · complete Profile to unlock more drives"}
+            {profileWarn && (
+              <p className="warn-note profile-warn-line">
+                {profileWarn}{" "}
+                <button type="button" className="text-link" onClick={() => setTab("profile")}>
+                  Open Profile
+                </button>
               </p>
+            )}
+            <div className="panel-head panel-head-tight">
+              <h3>Eligible drives</h3>
+              {(profile.branch || (profile.cgpa !== "" && profile.cgpa != null)) && (
+                <p className="muted">
+                  Your filter: {[profile.branch, profile.cgpa !== "" && profile.cgpa != null ? `CGPA ${profile.cgpa}` : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
             </div>
             <label className="full search-field">
               Search drives
@@ -347,11 +344,19 @@ export default function StudentDashboard() {
                   message={
                     drives.length
                       ? "Try a different search, or clear the filter."
-                      : "Update your branch and CGPA in Profile, or check back when new drives open."
+                      : profileWarn
+                        ? "Finish your Profile to unlock matching drives."
+                        : "Check back when new drives open."
                   }
-                  actionLabel={drives.length ? "Clear search" : "Go to Profile"}
+                  actionLabel={
+                    drives.length ? "Clear search" : profileWarn ? "Go to Profile" : undefined
+                  }
                   onAction={
-                    drives.length ? () => setDriveQuery("") : () => setTab("profile")
+                    drives.length
+                      ? () => setDriveQuery("")
+                      : profileWarn
+                        ? () => setTab("profile")
+                        : undefined
                   }
                 />
               )}
@@ -465,15 +470,22 @@ export default function StudentDashboard() {
                 <input
                   value={profile.cgpa}
                   onChange={updateField("cgpa")}
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="10"
+                  onKeyDown={cgpaKeyDown}
+                  type="text"
+                  inputMode="decimal"
                 />
               </label>
               <label className="full">
                 Phone
-                <input value={profile.phone} onChange={updateField("phone")} />
+                <input
+                  value={profile.phone}
+                  onChange={updateField("phone")}
+                  onKeyDown={phoneKeyDown}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  autoComplete="tel-national"
+                />
               </label>
               <button className="btn primary" type="submit">
                 Save profile
@@ -482,7 +494,10 @@ export default function StudentDashboard() {
 
             <div className="panel-head" style={{ marginTop: "1.4rem" }}>
               <h3>Resume</h3>
-              <p className="muted">PDF only, max 5 MB. Required before applying.</p>
+              <p className="muted">
+                PDF only. Each resume must be unique — the same file cannot be shared across
+                students.
+              </p>
             </div>
             <p className="muted">
               {profile.has_resume

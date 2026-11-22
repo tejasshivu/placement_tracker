@@ -13,7 +13,12 @@ from rounds import (
     round_label,
 )
 from scheduling import find_drive_conflicts
-from utils import normalize_branches_csv, role_required
+from utils import (
+    apply_sunday_college_flag,
+    ensure_not_past_date,
+    normalize_branches_csv,
+    role_required,
+)
 
 drives_bp = Blueprint("drives", __name__, url_prefix="/api/drives")
 
@@ -80,7 +85,8 @@ def list_drives():
         Drive.drive_time.asc(),
         Drive.created_at.desc(),
     ).all()
-    include_conflicts = role == "placement"
+    # Companies need conflict hints on their proposals before placement approves
+    include_conflicts = role in ("placement", "company")
 
     # Students only see drives they are eligible for (CGPA + branch),
     # plus any drive they already applied to.
@@ -143,23 +149,38 @@ def create_drive():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    from utils import parse_cgpa
+
+    try:
+        min_cgpa = parse_cgpa(data.get("min_cgpa", 0.0), field_name="Min CGPA", allow_none=False)
+        drive_date = ensure_not_past_date(
+            _parse_date(data.get("drive_date")), field_name="Preferred date"
+        )
+        deadline = ensure_not_past_date(
+            _parse_date(data.get("deadline")), field_name="Deadline"
+        )
+        _validate_alternate_dates(data.get("alternate_dates"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     drive = Drive(
         company_id=company_id,
         title=data["title"],
         role=data.get("role"),
         package_lpa=data.get("package_lpa"),
         location=data.get("location"),
-        drive_date=_parse_date(data.get("drive_date")),
+        drive_date=drive_date,
         drive_time=drive_time,
-        deadline=_parse_date(data.get("deadline")),
+        deadline=deadline,
         alternate_dates=data.get("alternate_dates"),
-        min_cgpa=data.get("min_cgpa", 0.0),
+        min_cgpa=min_cgpa,
         eligible_branches=normalize_branches_csv(data.get("eligible_branches")),
         description=data.get("description"),
         status=status,
         current_round="registration",
         placement_note=data.get("placement_note"),
     )
+    apply_sunday_college_flag(drive)
     db.session.add(drive)
     db.session.commit()
     return jsonify(drive.to_dict(include_conflicts=True)), 201
@@ -177,37 +198,75 @@ def update_drive(drive_id):
         return jsonify({"error": "Not your drive"}), 403
 
     data = request.get_json() or {}
+
+    if claims.get("role") == "company":
+        if drive.status not in ("proposed", "needs_reschedule", "scheduled"):
+            return jsonify({"error": "This drive can no longer be edited"}), 400
+        proposal_fields = {
+            "title",
+            "role",
+            "package_lpa",
+            "location",
+            "description",
+            "drive_date",
+            "drive_time",
+            "deadline",
+            "alternate_dates",
+            "min_cgpa",
+            "eligible_branches",
+        }
+        if drive.status == "scheduled" and (set(data.keys()) & proposal_fields):
+            return jsonify(
+                {
+                    "error": "Scheduled drives: ask placement to reschedule to change slot details"
+                }
+            ), 400
+
     for field in (
         "title",
         "role",
         "package_lpa",
         "location",
-        "min_cgpa",
         "description",
         "is_active",
-        "alternate_dates",
     ):
         if field in data:
             setattr(drive, field, data[field])
+    if "min_cgpa" in data:
+        from utils import parse_cgpa
+
+        try:
+            drive.min_cgpa = parse_cgpa(
+                data["min_cgpa"], field_name="Min CGPA", allow_none=False
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     if "eligible_branches" in data:
         drive.eligible_branches = normalize_branches_csv(data["eligible_branches"])
 
-    if "drive_date" in data:
-        drive.drive_date = _parse_date(data["drive_date"])
-        # Company proposing a new date after reschedule request
-        if claims.get("role") == "company" and drive.status == "needs_reschedule":
-            drive.status = "proposed"
+    try:
+        if "drive_date" in data:
+            drive.drive_date = ensure_not_past_date(
+                _parse_date(data["drive_date"]), field_name="Drive date"
+            )
+            if claims.get("role") == "company" and drive.status == "needs_reschedule":
+                drive.status = "proposed"
 
-    if "drive_time" in data:
-        try:
+        if "drive_time" in data:
             drive.drive_time = _parse_time(data["drive_time"])
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-        if claims.get("role") == "company" and drive.status == "needs_reschedule":
-            drive.status = "proposed"
+            if claims.get("role") == "company" and drive.status == "needs_reschedule":
+                drive.status = "proposed"
 
-    if "deadline" in data:
-        drive.deadline = _parse_date(data["deadline"])
+        if "deadline" in data:
+            drive.deadline = ensure_not_past_date(
+                _parse_date(data["deadline"]), field_name="Deadline"
+            )
+
+        if "alternate_dates" in data:
+            _validate_alternate_dates(data.get("alternate_dates"))
+            drive.alternate_dates = data.get("alternate_dates")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     round_changed = False
     if "current_round" in data:
@@ -222,6 +281,13 @@ def update_drive(drive_id):
         round_key = data["round_detail"].get("round") or drive.current_round or "registration"
         if round_key not in DRIVE_ROUND_KEYS:
             return jsonify({"error": "Invalid round in round_detail"}), 400
+        try:
+            if data["round_detail"].get("date"):
+                ensure_not_past_date(
+                    _parse_date(data["round_detail"]["date"]), field_name="Round date"
+                )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         details = parse_round_details(drive.round_details)
         details = merge_round_detail(details, round_key, data["round_detail"])
         drive.round_details = dump_round_details(details)
@@ -229,11 +295,18 @@ def update_drive(drive_id):
     if "round_details" in data and isinstance(data["round_details"], dict):
         # Full replace/merge of provided keys
         details = parse_round_details(drive.round_details)
-        for key, patch in data["round_details"].items():
-            if key not in DRIVE_ROUND_KEYS:
-                continue
-            if isinstance(patch, dict):
-                details = merge_round_detail(details, key, patch)
+        try:
+            for key, patch in data["round_details"].items():
+                if key not in DRIVE_ROUND_KEYS:
+                    continue
+                if isinstance(patch, dict):
+                    if patch.get("date"):
+                        ensure_not_past_date(
+                            _parse_date(patch["date"]), field_name="Round date"
+                        )
+                    details = merge_round_detail(details, key, patch)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         drive.round_details = dump_round_details(details)
 
     if claims.get("role") == "placement":
@@ -247,6 +320,7 @@ def update_drive(drive_id):
     if round_changed:
         _on_round_change(drive, user)
 
+    apply_sunday_college_flag(drive)
     db.session.commit()
     return jsonify(drive.to_dict(include_conflicts=True))
 
@@ -326,19 +400,32 @@ def schedule_action(drive_id):
     try:
         if action == "approve":
             if data.get("drive_date"):
-                drive.drive_date = _parse_date(data["drive_date"])
+                drive.drive_date = ensure_not_past_date(
+                    _parse_date(data["drive_date"]), field_name="Drive date"
+                )
             if "drive_time" in data:
                 drive.drive_time = _parse_time(data.get("drive_time"))
             if not drive.drive_date:
                 return jsonify({"error": "drive_date is required to approve"}), 400
+            ensure_not_past_date(drive.drive_date, field_name="Drive date")
+            if drive.drive_date.weekday() == 6 and not data.get("college_confirmed"):
+                return jsonify(
+                    {
+                        "error": "Sunday drive: confirm with college first, then approve again.",
+                        "needs_college_confirm": True,
+                    }
+                ), 400
             drive.status = "scheduled"
             if "placement_note" in data:
                 drive.placement_note = data["placement_note"]
+            apply_sunday_college_flag(drive)
         elif action == "request_reschedule":
             drive.status = "needs_reschedule"
             drive.placement_note = data.get("placement_note") or "Please propose another date."
             if data.get("drive_date"):
-                drive.drive_date = _parse_date(data["drive_date"])
+                drive.drive_date = ensure_not_past_date(
+                    _parse_date(data["drive_date"]), field_name="Drive date"
+                )
             if "drive_time" in data:
                 drive.drive_time = _parse_time(data.get("drive_time"))
         elif action == "cancel":
@@ -376,7 +463,26 @@ def _parse_date(value):
         return None
     if isinstance(value, date):
         return value
-    return date.fromisoformat(value)
+    return date.fromisoformat(str(value)[:10])
+
+
+def _validate_alternate_dates(value):
+    """Accept comma-separated YYYY-MM-DD or YYYY-MM-DDTHH:MM (or 'YYYY-MM-DD HH:MM')."""
+    if value in (None, ""):
+        return
+    for part in str(value).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        date_part = part
+        time_part = None
+        if "T" in part:
+            date_part, time_part = part.split("T", 1)
+        elif " " in part:
+            date_part, time_part = part.split(" ", 1)
+        ensure_not_past_date(_parse_date(date_part.strip()), field_name="Alternate date")
+        if time_part:
+            _parse_time(time_part.strip()[:5])
 
 
 def _parse_time(value):

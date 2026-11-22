@@ -57,6 +57,7 @@ class StudentProfile(db.Model):
     phone = db.Column(db.String(20))
     resume_path = db.Column(db.String(255))
     resume_original_name = db.Column(db.String(255))
+    resume_sha256 = db.Column(db.String(64))  # content hash — blocks duplicate uploads
 
     user = db.relationship("User", back_populates="student_profile")
     applications = db.relationship("Application", back_populates="student", cascade="all, delete-orphan")
@@ -84,7 +85,8 @@ class CompanyProfile(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
     company_name = db.Column(db.String(150), nullable=False)
     website = db.Column(db.String(200))
-    hr_contact = db.Column(db.String(120))
+    hr_name = db.Column(db.String(120))
+    hr_contact = db.Column(db.String(20))  # HR mobile (10 digits)
     description = db.Column(db.Text)
 
     user = db.relationship("User", back_populates="company_profile")
@@ -96,6 +98,7 @@ class CompanyProfile(db.Model):
             "user_id": self.user_id,
             "company_name": self.company_name,
             "website": self.website,
+            "hr_name": self.hr_name,
             "hr_contact": self.hr_contact,
             "description": self.description,
         }
@@ -113,7 +116,7 @@ class Drive(db.Model):
     drive_date = db.Column(db.Date)
     drive_time = db.Column(db.String(5))  # HH:MM — allows multiple drives same day
     deadline = db.Column(db.Date)
-    alternate_dates = db.Column(db.String(255))  # comma-separated YYYY-MM-DD
+    alternate_dates = db.Column(db.String(255))  # comma-separated YYYY-MM-DD or YYYY-MM-DDTHH:MM
     min_cgpa = db.Column(db.Float, default=0.0)
     eligible_branches = db.Column(db.String(255))  # comma-separated
     description = db.Column(db.Text)
@@ -160,6 +163,7 @@ class Drive(db.Model):
             "accepting_applications": (
                 (self.status or "") == "scheduled" and round_key == "registration"
             ),
+            "applications_count": len(self.applications) if self.applications is not None else 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if include_conflicts:

@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { Navigate, Route, Routes, Link } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
+import SessionGuard from "./SessionGuard";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -11,9 +13,17 @@ import CompanyDashboard from "./pages/CompanyDashboard";
 import PlacementDashboard from "./pages/PlacementDashboard";
 
 function PrivateRoute({ role, children }) {
-  const { user, loading } = useAuth();
+  const { user, loading, syncSession } = useAuth();
+  const hasToken = Boolean(localStorage.getItem("token"));
+
+  useEffect(() => {
+    syncSession();
+  }, [syncSession]);
+
   if (loading) return <p className="muted">Loading…</p>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user || !hasToken) {
+    return <Navigate to="/login" replace />;
+  }
   if (role && user.role !== role) return <Navigate to={`/${user.role}`} replace />;
   return children;
 }
@@ -23,6 +33,7 @@ function Shell() {
 
   return (
     <div className="app-shell">
+      <SessionGuard />
       <header className="topbar">
         <Link to="/" className="logo">
           Ascendia

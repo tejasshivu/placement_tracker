@@ -1,6 +1,15 @@
+import { useEffect, useRef } from "react";
+
 export default function DashboardTabs({ tabs, active, onChange }) {
+  const barRef = useRef(null);
+
+  useEffect(() => {
+    const activeBtn = barRef.current?.querySelector('[aria-selected="true"]');
+    activeBtn?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [active]);
+
   return (
-    <div className="tab-bar" role="tablist" aria-label="Dashboard sections">
+    <div className="tab-bar" role="tablist" aria-label="Dashboard sections" ref={barRef}>
       {tabs.map((tab) => (
         <button
           key={tab.id}

@@ -141,11 +141,10 @@ def update_student(student_id):
     student = StudentProfile.query.get_or_404(student_id)
     data = request.get_json() or {}
 
-    from utils import normalize_branch
+    from utils import normalize_branch, parse_cgpa, parse_phone
 
-    for field in ("full_name", "phone"):
-        if field in data and data[field] is not None:
-            setattr(student, field, data[field])
+    if "full_name" in data and data["full_name"] is not None:
+        student.full_name = data["full_name"]
     if "branch" in data and data["branch"] is not None:
         student.branch = normalize_branch(data["branch"])
 
@@ -154,14 +153,14 @@ def update_student(student_id):
         student.semester = (
             int(semester_value) if semester_value not in (None, "") else None
         )
-    if "cgpa" in data:
-        if data["cgpa"] in (None, ""):
-            student.cgpa = None
-        else:
-            cgpa = float(data["cgpa"])
-            if cgpa < 0 or cgpa > 10:
-                return jsonify({"error": "CGPA must be between 0 and 10"}), 400
-            student.cgpa = cgpa
+
+    try:
+        if "cgpa" in data:
+            student.cgpa = parse_cgpa(data["cgpa"])
+        if "phone" in data:
+            student.phone = parse_phone(data["phone"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     if "email" in data and data["email"]:
         new_email = data["email"].lower().strip()

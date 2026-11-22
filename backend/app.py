@@ -17,7 +17,10 @@ def create_app(config_class=Config):
     db.init_app(app)
     jwt.init_app(app)
     migrate.init_app(app, db)
-    cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
+    origins = app.config.get("FRONTEND_ORIGIN") or "*"
+    if origins != "*":
+        origins = [o.strip() for o in origins.split(",") if o.strip()]
+    cors.init_app(app, resources={r"/api/*": {"origins": origins}})
 
     register_blueprints(app)
 
@@ -48,6 +51,10 @@ def _ensure_sqlite_columns():
         if "resume_original_name" not in student_cols:
             conn.exec_driver_sql(
                 "ALTER TABLE student_profiles ADD COLUMN resume_original_name VARCHAR(255)"
+            )
+        if "resume_sha256" not in student_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE student_profiles ADD COLUMN resume_sha256 VARCHAR(64)"
             )
 
         user_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(users)").fetchall()}
@@ -87,6 +94,12 @@ def _ensure_sqlite_columns():
             conn.exec_driver_sql("ALTER TABLE applications ADD COLUMN last_round_cleared VARCHAR(30)")
         if "round_attendance" not in app_cols:
             conn.exec_driver_sql("ALTER TABLE applications ADD COLUMN round_attendance TEXT")
+
+        company_cols = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(company_profiles)").fetchall()
+        }
+        if "hr_name" not in company_cols:
+            conn.exec_driver_sql("ALTER TABLE company_profiles ADD COLUMN hr_name VARCHAR(120)")
 
         conn.commit()
 
@@ -128,4 +141,6 @@ def _normalize_branch_casing():
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # 0.0.0.0 = reachable from phone on the same Wi‑Fi (not only this PC)
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(debug=os.getenv("FLASK_DEBUG", "1") == "1", host="0.0.0.0", port=port)

@@ -25,16 +25,13 @@ def register_student():
     db.session.add(user)
     db.session.flush()
 
-    cgpa = data.get("cgpa")
-    if cgpa not in (None, ""):
-        try:
-            cgpa = float(cgpa)
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid CGPA"}), 400
-        if cgpa < 0 or cgpa > 10:
-            return jsonify({"error": "CGPA must be between 0 and 10"}), 400
-    else:
-        cgpa = None
+    from utils import normalize_branch, parse_cgpa, parse_phone
+
+    try:
+        cgpa = parse_cgpa(data.get("cgpa"))
+        phone = parse_phone(data.get("phone"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     semester = data.get("semester", data.get("year"))
     if semester not in (None, ""):
@@ -45,15 +42,13 @@ def register_student():
     else:
         semester = None
 
-    from utils import normalize_branch
-
     profile = StudentProfile(
         user_id=user.id,
         full_name=data["full_name"],
         branch=normalize_branch(data.get("branch")),
         semester=semester,
         cgpa=cgpa,
-        phone=data.get("phone"),
+        phone=phone,
     )
     db.session.add(profile)
     db.session.commit()
@@ -77,11 +72,23 @@ def register_company():
     db.session.add(user)
     db.session.flush()
 
+    from utils import parse_phone
+
+    hr_name = (data.get("hr_name") or "").strip() or None
+    try:
+        hr_phone = parse_phone(
+            data.get("hr_contact") or data.get("hr_phone"),
+            field_name="HR mobile",
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     profile = CompanyProfile(
         user_id=user.id,
         company_name=data["company_name"],
         website=data.get("website"),
-        hr_contact=data.get("hr_contact"),
+        hr_name=hr_name,
+        hr_contact=hr_phone,
         description=data.get("description"),
     )
     db.session.add(profile)

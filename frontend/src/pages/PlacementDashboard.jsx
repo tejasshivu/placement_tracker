@@ -8,7 +8,12 @@ import MonthCalendar from "../components/MonthCalendar";
 import StatusPill from "../components/StatusPill";
 import { COURSES, SEMESTERS } from "../constants/courses";
 import { DRIVE_ROUNDS, roundLabel } from "../constants/rounds";
-import { formatDriveWhen } from "../utils/driveWhen";
+import { cgpaKeyDown, parseCgpa, sanitizeCgpaInput } from "../utils/cgpa";
+import { isPastDate, isSunday, pastDateError, todayISO } from "../utils/dates";
+import { formatAlternateList } from "../components/AlternateDatesField";
+import { buildDriveMarks, driveColor } from "../utils/driveColor";
+import { formatDriveWhen, formatNiceTime } from "../utils/driveWhen";
+import { parsePhone, phoneKeyDown, sanitizePhoneInput } from "../utils/phone";
 import { driveStatusLabel } from "../utils/statusLabels";
 
 const emptyReport = {
@@ -190,9 +195,14 @@ export default function PlacementDashboard() {
   const saveStudent = async (e) => {
     e.preventDefault();
     if (!selectedStudent) return;
-    const cgpaNum = editForm.cgpa === "" ? null : Number(editForm.cgpa);
-    if (cgpaNum !== null && (cgpaNum < 0 || cgpaNum > 10)) {
-      setDetailError("CGPA must be between 0 and 10");
+    const parsed = parseCgpa(editForm.cgpa);
+    if (!parsed.ok) {
+      setDetailError(parsed.error);
+      return;
+    }
+    const phone = parsePhone(editForm.phone);
+    if (!phone.ok) {
+      setDetailError(phone.error);
       return;
     }
     setSavingStudent(true);
@@ -201,7 +211,8 @@ export default function PlacementDashboard() {
       const { data } = await api.patch(`/placement/students/${selectedStudent.id}`, {
         ...editForm,
         semester: editForm.semester === "" ? null : Number(editForm.semester),
-        cgpa: cgpaNum,
+        cgpa: parsed.value,
+        phone: phone.value,
       });
       setSelectedStudent(data);
       setEditForm({
@@ -221,16 +232,38 @@ export default function PlacementDashboard() {
     }
   };
 
-  const scheduleAction = async (driveId, action) => {
+  const minDate = todayISO();
+
+  const scheduleAction = async (driveId, action, { collegeConfirmed = false } = {}) => {
     try {
       const drive = drives.find((d) => d.id === driveId);
+      const nextDate = scheduleDates[driveId] || drive?.drive_date || undefined;
+      if (action === "approve" && isPastDate(nextDate)) {
+        setMessage(pastDateError("Drive date"));
+        return;
+      }
+      if (action !== "cancel" && nextDate && isPastDate(nextDate)) {
+        setMessage(pastDateError("Drive date"));
+        return;
+      }
+      if (action === "approve" && isSunday(nextDate) && !collegeConfirmed) {
+        const ok = window.confirm(
+          "This drive is on a Sunday.\n\nHave you confirmed with the college that this slot is allowed?\n\nClick OK only if college has approved."
+        );
+        if (!ok) {
+          setMessage("Sunday drive not approved — confirm with college first.");
+          return;
+        }
+        return scheduleAction(driveId, action, { collegeConfirmed: true });
+      }
       const { data } = await api.post(`/drives/${driveId}/schedule`, {
         action,
+        college_confirmed: collegeConfirmed || undefined,
         placement_note:
           scheduleNotes[driveId] !== undefined
             ? scheduleNotes[driveId]
             : drive?.placement_note || "",
-        drive_date: scheduleDates[driveId] || drive?.drive_date || undefined,
+        drive_date: nextDate,
         drive_time:
           scheduleTimes[driveId] !== undefined
             ? scheduleTimes[driveId] || null
@@ -326,13 +359,13 @@ export default function PlacementDashboard() {
   const companyQ = companyQuery.trim().toLowerCase();
   const filteredPending = pending.filter((c) => {
     if (!companyQ) return true;
-    return [c.company_name, c.email, c.website]
+    return [c.company_name, c.email, c.website, c.hr_name, c.hr_contact]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(companyQ));
   });
   const filteredApproved = approvedCompanies.filter((c) => {
     if (!companyQ) return true;
-    return [c.company_name, c.email, c.website, c.hr_contact]
+    return [c.company_name, c.email, c.website, c.hr_name, c.hr_contact]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(companyQ));
   });
@@ -345,6 +378,11 @@ export default function PlacementDashboard() {
     });
     return map;
   }, [drives]);
+
+  const calendarDriveMarks = useMemo(
+    () => buildDriveMarks(drives, { skipCancelled: true }),
+    [drives]
+  );
 
   const drivesOnCalendarDay = useMemo(() => {
     if (!calendarDay) return [];
@@ -443,7 +481,14 @@ export default function PlacementDashboard() {
                             {drive.package_lpa != null ? ` · ${drive.package_lpa} LPA` : ""}
                           </div>
                           {drive.alternate_dates && (
-                            <div className="sheet-sub">Alt: {drive.alternate_dates}</div>
+                            <div className="sheet-sub">
+                              Alt: {formatAlternateList(drive.alternate_dates)}
+                            </div>
+                          )}
+                          {isSunday(scheduleDates[drive.id] ?? drive.drive_date) && (
+                            <div className="warn-note sheet-sub">
+                              Sunday — confirm with college before approve
+                            </div>
                           )}
                         </td>
                         <td>{drive.eligible_branches || "All"}</td>
@@ -475,6 +520,7 @@ export default function PlacementDashboard() {
                           <input
                             className="sheet-input"
                             type="date"
+                            min={minDate}
                             value={scheduleDates[drive.id] ?? drive.drive_date ?? ""}
                             onChange={(e) =>
                               setScheduleDates({
@@ -496,6 +542,11 @@ export default function PlacementDashboard() {
                               })
                             }
                           />
+                          {(scheduleTimes[drive.id] ?? drive.drive_time) ? (
+                            <span className="muted field-hint">
+                              {formatNiceTime(scheduleTimes[drive.id] ?? drive.drive_time)}
+                            </span>
+                          ) : null}
                         </td>
                         <td className="sheet-note-cell">
                           <input
@@ -577,6 +628,7 @@ export default function PlacementDashboard() {
                       Date
                       <input
                         type="date"
+                        min={minDate}
                         value={scheduleDates[drive.id] ?? drive.drive_date ?? ""}
                         onChange={(e) =>
                           setScheduleDates({ ...scheduleDates, [drive.id]: e.target.value })
@@ -592,6 +644,11 @@ export default function PlacementDashboard() {
                           setScheduleTimes({ ...scheduleTimes, [drive.id]: e.target.value })
                         }
                       />
+                      {(scheduleTimes[drive.id] ?? drive.drive_time) ? (
+                        <span className="muted field-hint">
+                          {formatNiceTime(scheduleTimes[drive.id] ?? drive.drive_time)}
+                        </span>
+                      ) : null}
                     </label>
                   </div>
                   <label className="full" style={{ marginTop: "0.45rem" }}>
@@ -654,6 +711,7 @@ export default function PlacementDashboard() {
             <div className="calendar-layout">
               <MonthCalendar
                 markedDates={markedDriveDates}
+                driveMarks={calendarDriveMarks}
                 selectedDate={calendarDay}
                 onSelectDate={setCalendarDay}
               />
@@ -662,10 +720,21 @@ export default function PlacementDashboard() {
                 {calendarDay && (
                   <div className="card-list">
                     {drivesOnCalendarDay.map((drive) => (
-                      <article key={drive.id} className="soft-card">
-                        <strong>{drive.title}</strong>
+                      <article
+                        key={drive.id}
+                        className="soft-card cal-drive-card"
+                        style={{ "--drive-color": driveColor(drive.id) }}
+                      >
+                        <strong>
+                          <span
+                            className="cal-drive-swatch"
+                            style={{ background: driveColor(drive.id) }}
+                          />
+                          {drive.title}
+                        </strong>
                         <p className="muted">
-                          {drive.company_name} · {drive.drive_time || "Time TBA"} ·{" "}
+                          {drive.company_name} ·{" "}
+                          {drive.drive_time ? formatNiceTime(drive.drive_time) : "Time TBA"} ·{" "}
                           {driveStatusLabel(drive.status)}
                         </p>
                         <p className="muted">Branches: {drive.eligible_branches || "All"}</p>
@@ -939,112 +1008,124 @@ export default function PlacementDashboard() {
         )}
 
         {tab === "companies" && (
-          <>
-            <div className="panel-head">
+          <div className="companies-compact">
+            <div className="panel-head panel-head-tight">
               <h3>Companies</h3>
-              <p className="muted">Approve new partners and track who already has access</p>
-            </div>
-            <label className="full search-field">
-              Search companies
-              <input
-                value={companyQuery}
-                onChange={(e) => setCompanyQuery(e.target.value)}
-                placeholder="Name, email, website, or HR contact"
-              />
-            </label>
-
-            <h4 className="section-label">Pending approval</h4>
-            <div className="card-list">
-              {filteredPending.map((c) => (
-                <article key={c.id} className="soft-card row-card">
-                  <button
-                    type="button"
-                    className="student-name-btn"
-                    onClick={() => openCompany(c.id)}
-                  >
-                    <strong>{c.company_name}</strong>
-                    <p className="muted">
-                      {c.email}
-                      {c.website ? ` · ${c.website}` : ""}
-                    </p>
-                  </button>
-                  <div className="cta-row">
-                    <button className="btn ghost" type="button" onClick={() => openCompany(c.id)}>
-                      View
-                    </button>
-                    <button className="btn primary" type="button" onClick={() => approve(c.id)}>
-                      Approve
-                    </button>
-                  </div>
-                </article>
-              ))}
-              {!filteredPending.length && (
-                <p className="muted empty-note">
-                  {pending.length ? "No matching pending companies." : "No pending companies."}
-                </p>
-              )}
+              <label className="search-field search-field-inline">
+                <span className="sr-only">Search companies</span>
+                <input
+                  value={companyQuery}
+                  onChange={(e) => setCompanyQuery(e.target.value)}
+                  placeholder="Search…"
+                />
+              </label>
             </div>
 
-            <h4 className="section-label" style={{ marginTop: "1.4rem" }}>
-              Approved companies ({filteredApproved.length}
-              {companyQ ? ` of ${approvedCompanies.length}` : ""})
-            </h4>
-            <div className="table-wrap sheet-wrap">
-              <table className="report-table sheet-table sheet-compact">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Email</th>
-                    <th>Website</th>
-                    <th>HR contact</th>
-                    <th>Drives</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredApproved.map((c) => (
-                    <tr key={c.id}>
-                      <td>
-                        <button
-                          type="button"
-                          className="student-name-btn"
-                          onClick={() => openCompany(c.id)}
-                        >
-                          <strong>{c.company_name}</strong>
-                        </button>
-                      </td>
-                      <td>{c.email || "—"}</td>
-                      <td>{c.website || "—"}</td>
-                      <td>{c.hr_contact || "—"}</td>
-                      <td>{c.drives_count ?? 0}</td>
-                      <td>
-                        <span className="status-pill status-scheduled">approved</span>
-                      </td>
-                      <td>
-                        <button
-                          className="btn ghost"
-                          type="button"
-                          onClick={() => openCompany(c.id)}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredApproved.length && (
+            <div className="companies-block">
+              <h4 className="section-label section-label-tight">
+                Pending ({filteredPending.length}
+                {companyQ && pending.length ? `/${pending.length}` : ""})
+              </h4>
+              <div className="table-wrap sheet-wrap">
+                <table className="report-table sheet-table sheet-compact">
+                  <thead>
                     <tr>
-                      <td colSpan={7} className="muted">
-                        {approvedCompanies.length
-                          ? "No matching approved companies."
-                          : "No approved companies yet."}
-                      </td>
+                      <th>Company</th>
+                      <th>Email</th>
+                      <th>HR</th>
+                      <th></th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredPending.map((c) => (
+                      <tr key={c.id}>
+                        <td>
+                          <button
+                            type="button"
+                            className="student-name-btn"
+                            onClick={() => openCompany(c.id)}
+                          >
+                            <strong>{c.company_name}</strong>
+                          </button>
+                        </td>
+                        <td>{c.email || "—"}</td>
+                        <td>
+                          {c.hr_name || c.hr_contact
+                            ? [c.hr_name, c.hr_contact].filter(Boolean).join(" · ")
+                            : "—"}
+                        </td>
+                        <td className="actions-cell">
+                          <button
+                            className="btn primary btn-xs"
+                            type="button"
+                            onClick={() => approve(c.id)}
+                          >
+                            Approve
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!filteredPending.length && (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          {pending.length ? "No matches." : "None pending."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </>
+
+            <div className="companies-block">
+              <h4 className="section-label section-label-tight">
+                Approved ({filteredApproved.length}
+                {companyQ ? `/${approvedCompanies.length}` : ""})
+              </h4>
+              <div className="table-wrap sheet-wrap">
+                <table className="report-table sheet-table sheet-compact">
+                  <thead>
+                    <tr>
+                      <th>Company</th>
+                      <th>Email</th>
+                      <th>HR</th>
+                      <th>Drives</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredApproved.map((c) => (
+                      <tr
+                        key={c.id}
+                        className="click-row"
+                        onClick={() => openCompany(c.id)}
+                      >
+                        <td>
+                          <strong>{c.company_name}</strong>
+                          {c.website ? (
+                            <span className="muted row-sub"> · {c.website}</span>
+                          ) : null}
+                        </td>
+                        <td>{c.email || "—"}</td>
+                        <td>
+                          {c.hr_name || c.hr_contact
+                            ? [c.hr_name, c.hr_contact].filter(Boolean).join(" · ")
+                            : "—"}
+                        </td>
+                        <td>{c.drives_count ?? 0}</td>
+                      </tr>
+                    ))}
+                    {!filteredApproved.length && (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          {approvedCompanies.length ? "No matches." : "None approved yet."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         )}
 
         {tab === "drives" && (
@@ -1087,7 +1168,7 @@ export default function PlacementDashboard() {
                       </td>
                       <td>{drive.role || "—"}</td>
                       <td>{drive.drive_date || "TBA"}</td>
-                      <td>{drive.drive_time || "—"}</td>
+                      <td>{drive.drive_time ? formatNiceTime(drive.drive_time) : "—"}</td>
                       <td>
                         <select
                           className="sheet-input"
@@ -1228,7 +1309,13 @@ export default function PlacementDashboard() {
                     </tr>
                     <tr>
                       <th>HR</th>
-                      <td>{selectedCompany.hr_contact || "—"}</td>
+                      <td>
+                        {selectedCompany.hr_name || selectedCompany.hr_contact
+                          ? [selectedCompany.hr_name, selectedCompany.hr_contact]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : "—"}
+                      </td>
                     </tr>
                     <tr>
                       <th>About</th>
@@ -1388,18 +1475,26 @@ export default function PlacementDashboard() {
                 CGPA
                 <input
                   value={editForm.cgpa}
-                  onChange={(e) => setEditForm({ ...editForm, cgpa: e.target.value })}
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="10"
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, cgpa: sanitizeCgpaInput(e.target.value) })
+                  }
+                  onKeyDown={cgpaKeyDown}
+                  type="text"
+                  inputMode="decimal"
                 />
               </label>
               <label>
                 Phone
                 <input
                   value={editForm.phone}
-                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, phone: sanitizePhoneInput(e.target.value) })
+                  }
+                  onKeyDown={phoneKeyDown}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  autoComplete="tel-national"
                 />
               </label>
 

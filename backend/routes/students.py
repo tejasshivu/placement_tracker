@@ -1,3 +1,4 @@
+import hashlib
 import os
 import uuid
 
@@ -34,11 +35,10 @@ def update_my_profile():
     profile = user.student_profile
     data = request.get_json() or {}
 
-    from utils import normalize_branch
+    from utils import normalize_branch, parse_cgpa, parse_phone
 
-    for field in ("full_name", "phone"):
-        if field in data and data[field] is not None:
-            setattr(profile, field, data[field])
+    if "full_name" in data and data["full_name"] is not None:
+        profile.full_name = data["full_name"]
     if "branch" in data and data["branch"] is not None:
         profile.branch = normalize_branch(data["branch"])
 
@@ -48,14 +48,13 @@ def update_my_profile():
             int(semester_value) if semester_value not in (None, "") else None
         )
 
-    if "cgpa" in data:
-        if data["cgpa"] in (None, ""):
-            profile.cgpa = None
-        else:
-            cgpa = float(data["cgpa"])
-            if cgpa < 0 or cgpa > 10:
-                return jsonify({"error": "CGPA must be between 0 and 10"}), 400
-            profile.cgpa = cgpa
+    try:
+        if "cgpa" in data:
+            profile.cgpa = parse_cgpa(data["cgpa"])
+        if "phone" in data:
+            profile.phone = parse_phone(data["phone"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     db.session.commit()
     return jsonify(profile.to_dict())
@@ -78,6 +77,35 @@ def upload_resume():
     if not _allowed_file(file.filename):
         return jsonify({"error": "Only PDF resumes are allowed"}), 400
 
+    raw = file.read()
+    if not raw:
+        return jsonify({"error": "Empty file"}), 400
+
+    digest = hashlib.sha256(raw).hexdigest()
+
+    # Same file already on this account
+    if profile.resume_sha256 and profile.resume_sha256 == digest and profile.resume_path:
+        return jsonify(
+            {
+                "message": "This resume is already uploaded",
+                "profile": profile.to_dict(),
+            }
+        )
+
+    # Same PDF content used by another student
+    clash = (
+        StudentProfile.query.filter(
+            StudentProfile.resume_sha256 == digest,
+            StudentProfile.id != profile.id,
+        ).first()
+    )
+    if clash:
+        return jsonify(
+            {
+                "error": "This resume is already uploaded by another student. Upload your own PDF."
+            }
+        ), 409
+
     upload_dir = current_app.config["UPLOAD_FOLDER"]
     os.makedirs(upload_dir, exist_ok=True)
 
@@ -93,10 +121,12 @@ def upload_resume():
     original = secure_filename(file.filename)
     stored_name = f"student_{profile.id}_{uuid.uuid4().hex}.pdf"
     save_path = os.path.join(upload_dir, stored_name)
-    file.save(save_path)
+    with open(save_path, "wb") as out:
+        out.write(raw)
 
     profile.resume_path = stored_name
     profile.resume_original_name = original
+    profile.resume_sha256 = digest
     db.session.commit()
 
     return jsonify(

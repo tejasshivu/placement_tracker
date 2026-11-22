@@ -17,11 +17,15 @@ export function formatNiceDate(iso) {
   });
 }
 
+/** Always show 12-hour clock with AM/PM (e.g. 2:30 PM). */
 export function formatNiceTime(hhmm) {
   if (!hhmm) return "";
   const [h, m] = String(hhmm).split(":").map(Number);
   if (Number.isNaN(h)) return hhmm;
-  const d = new Date();
-  d.setHours(h, m || 0, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const hour24 = h;
+  const minute = Number.isNaN(m) ? 0 : m;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  let hour12 = hour24 % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
