@@ -105,37 +105,25 @@ def _ensure_sqlite_columns():
 
 
 def _normalize_branch_casing():
-    """Collapse mixed-case branch values (CSE vs cse) to uppercase."""
+    """Collapse mixed-case branch values (CSE vs cse) to uppercase (SQLite + Postgres)."""
+    from models import Drive, StudentProfile
     from utils import normalize_branch, normalize_branches_csv
 
     dirty = False
-    with db.engine.connect() as conn:
-        students = conn.exec_driver_sql(
-            "SELECT id, branch FROM student_profiles WHERE branch IS NOT NULL"
-        ).fetchall()
-        for row_id, branch in students:
-            fixed = normalize_branch(branch)
-            if fixed != branch:
-                conn.exec_driver_sql(
-                    "UPDATE student_profiles SET branch = ? WHERE id = ?",
-                    (fixed, row_id),
-                )
-                dirty = True
+    for student in StudentProfile.query.filter(StudentProfile.branch.isnot(None)).all():
+        fixed = normalize_branch(student.branch)
+        if fixed != student.branch:
+            student.branch = fixed
+            dirty = True
 
-        drives = conn.exec_driver_sql(
-            "SELECT id, eligible_branches FROM drives WHERE eligible_branches IS NOT NULL"
-        ).fetchall()
-        for row_id, branches in drives:
-            fixed = normalize_branches_csv(branches)
-            if fixed != branches:
-                conn.exec_driver_sql(
-                    "UPDATE drives SET eligible_branches = ? WHERE id = ?",
-                    (fixed, row_id),
-                )
-                dirty = True
+    for drive in Drive.query.filter(Drive.eligible_branches.isnot(None)).all():
+        fixed = normalize_branches_csv(drive.eligible_branches)
+        if fixed != drive.eligible_branches:
+            drive.eligible_branches = fixed
+            dirty = True
 
-        if dirty:
-            conn.commit()
+    if dirty:
+        db.session.commit()
 
 
 app = create_app()

@@ -8,10 +8,9 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
 def _database_uri():
-    uri = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{os.path.join(BASE_DIR, 'placement.db')}",
-    )
+    uri = (os.getenv("DATABASE_URL") or "").strip()
+    if not uri:
+        uri = f"sqlite:///{os.path.join(BASE_DIR, 'placement.db')}"
     # Render/Heroku sometimes give postgres:// — SQLAlchemy wants postgresql://
     if uri.startswith("postgres://"):
         uri = uri.replace("postgres://", "postgresql://", 1)
@@ -31,4 +30,4 @@ class Config:
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB files
 
     # Comma-separated frontend origins for CORS (e.g. https://ascendia.vercel.app)
-    FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*")
+    FRONTEND_ORIGIN = (os.getenv("FRONTEND_ORIGIN") or "*").strip() or "*"

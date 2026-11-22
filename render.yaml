@@ -20,6 +20,6 @@ services:
           name: ascendia-db
           property: connectionString
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: "*"
       - key: PYTHON_VERSION
         value: "3.12.8"
