@@ -409,23 +409,11 @@ export default function PlacementDashboard() {
     <div className="dashboard dash-shell">
       <header className="dash-header">
         <div>
-          <p className="dash-eyebrow">Placement control room</p>
           <h2>Campus operations</h2>
-          <p className="muted">Approve companies, guide students, and track hiring outcomes</p>
-        </div>
-        <div className="dash-quick-stats">
-          <div className="mini-stat">
-            <span>Students</span>
-            <strong>{s.students}</strong>
-          </div>
-          <div className="mini-stat">
-            <span>Pending</span>
-            <strong>{s.companies_pending}</strong>
-          </div>
-          <div className="mini-stat">
-            <span>Selected</span>
-            <strong>{report.by_status.selected}</strong>
-          </div>
+          <p className="muted">
+            {s.students} students · {s.companies_pending} companies pending ·{" "}
+            {report.by_status.selected} selected
+          </p>
         </div>
       </header>
 

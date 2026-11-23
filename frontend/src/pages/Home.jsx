@@ -23,21 +23,21 @@ export default function Home() {
                 Log in
               </Link>
               <Link className="btn ghost" to="/register/student">
-                Student sign up
-              </Link>
-              <Link className="btn ghost" to="/register/company">
-                Company sign up
+                Sign up
               </Link>
             </>
           )}
         </div>
+        {!user && (
+          <p className="muted hero-secondary-link">
+            Hiring as a company? <Link to="/register/company">Register here</Link>
+          </p>
+        )}
       </div>
 
       <div className="hero-visual" aria-hidden="true">
-        <div className="hero-orb hero-orb-a" />
-        <div className="hero-orb hero-orb-b" />
         <div className="hero-frame">
-          <p className="hero-frame-kicker">Live campus portal</p>
+          <p className="hero-frame-kicker">Campus portal</p>
           <p className="hero-frame-title">Drives · Applications · Offers</p>
           <div className="hero-frame-lines">
             <span />

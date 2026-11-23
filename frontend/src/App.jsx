@@ -41,11 +41,10 @@ function Shell() {
         <nav>
           {user ? (
             <>
-              <span className={`role-chip role-${user.role}`}>{user.role}</span>
               <Link className="nav-link" to={`/${user.role}`}>
                 Dashboard
               </Link>
-              <button className="btn ghost" onClick={logout}>
+              <button className="btn ghost compact" onClick={logout}>
                 Log out
               </button>
             </>
@@ -54,11 +53,8 @@ function Shell() {
               <Link className="nav-link" to="/login">
                 Log in
               </Link>
-              <Link className="nav-link" to="/register/student">
-                Student
-              </Link>
-              <Link className="btn primary compact" to="/register/company">
-                Company
+              <Link className="btn primary compact" to="/register/student">
+                Sign up
               </Link>
             </>
           )}

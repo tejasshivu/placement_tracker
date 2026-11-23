@@ -180,23 +180,11 @@ export default function StudentDashboard() {
     <div className="dashboard dash-shell">
       <header className="dash-header">
         <div>
-          <p className="dash-eyebrow">Student workspace</p>
           <h2>Hello{profile.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}</h2>
-          <p className="muted">Signed in as {user?.email}</p>
-        </div>
-        <div className="dash-quick-stats">
-          <div className="mini-stat">
-            <span>Drives</span>
-            <strong>{drives.length}</strong>
-          </div>
-          <div className="mini-stat">
-            <span>Applied</span>
-            <strong>{applications.length}</strong>
-          </div>
-          <div className="mini-stat">
-            <span>Resume</span>
-            <strong>{profile.has_resume ? "Ready" : "Missing"}</strong>
-          </div>
+          <p className="muted">
+            {drives.length} drives · {applications.length} applied · Resume{" "}
+            {profile.has_resume ? "ready" : "missing"}
+          </p>
         </div>
       </header>
 

@@ -668,23 +668,12 @@ export default function CompanyDashboard() {
     <div className="dashboard dash-shell">
       <header className="dash-header">
         <div>
-          <p className="dash-eyebrow">Company workspace</p>
           <h2>Hiring desk</h2>
           <p className="muted">
             {user?.is_approved === false
               ? "Awaiting placement team approval."
-              : `Signed in as ${user?.email}`}
+              : `${drives.length} drive${drives.length === 1 ? "" : "s"} · ${user?.email || ""}`}
           </p>
-        </div>
-        <div className="dash-quick-stats">
-          <div className="mini-stat">
-            <span>Drives</span>
-            <strong>{drives.length}</strong>
-          </div>
-          <div className="mini-stat">
-            <span>Status</span>
-            <strong>{user?.is_approved === false ? "Pending" : "Approved"}</strong>
-          </div>
         </div>
       </header>
 
@@ -702,9 +691,7 @@ export default function CompanyDashboard() {
           <>
             <div className="panel-head">
               <h3>Your drives</h3>
-              <p className="muted">
-                Spreadsheet view — click a row to open applicants. Use Manage for rounds and edits.
-              </p>
+              <p className="muted">Tap a drive to open applicants. Manage opens rounds and edits.</p>
             </div>
             <label className="full search-field">
               Search drives
@@ -759,24 +746,13 @@ export default function CompanyDashboard() {
                           </span>
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
-                          <div className="cta-row sheet-row-actions">
-                            <button
-                              className="btn ghost btn-xs"
-                              type="button"
-                              onClick={() =>
-                                setExpandedDriveId(expanded ? null : drive.id)
-                              }
-                            >
-                              {expanded ? "Hide" : "Manage"}
-                            </button>
-                            <button
-                              className="btn ghost btn-xs"
-                              type="button"
-                              onClick={() => viewApplicants(drive.id)}
-                            >
-                              Applicants
-                            </button>
-                          </div>
+                          <button
+                            className="btn ghost btn-xs"
+                            type="button"
+                            onClick={() => setExpandedDriveId(expanded ? null : drive.id)}
+                          >
+                            {expanded ? "Close" : "Manage"}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -818,18 +794,18 @@ export default function CompanyDashboard() {
                     </div>
                     <div className="sheet-actions-row" style={{ marginTop: "0.55rem" }}>
                       <button
-                        className="btn ghost"
-                        type="button"
-                        onClick={() => setExpandedDriveId(expanded ? null : drive.id)}
-                      >
-                        {expanded ? "Hide" : "Manage"}
-                      </button>
-                      <button
                         className="btn primary"
                         type="button"
                         onClick={() => viewApplicants(drive.id)}
                       >
-                        Applicants
+                        Open
+                      </button>
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() => setExpandedDriveId(expanded ? null : drive.id)}
+                      >
+                        {expanded ? "Close" : "Manage"}
                       </button>
                     </div>
                   </article>
@@ -1922,6 +1898,16 @@ export default function CompanyDashboard() {
         )}
 
       </section>
+      )}
+
+      {user?.is_approved !== false && tab !== "post" && (
+        <button
+          type="button"
+          className="btn primary mobile-fab"
+          onClick={() => setTab("post")}
+        >
+          Propose drive
+        </button>
       )}
     </div>
   );
