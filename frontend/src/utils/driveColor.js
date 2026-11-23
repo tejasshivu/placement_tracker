@@ -30,11 +30,14 @@ export function buildDriveMarks(drives, { skipCancelled = true } = {}) {
     if (!map[iso]) map[iso] = [];
     map[iso].push({
       id: drive.id,
-      color: driveColor(drive.id),
-      title:
-        drive.title ||
-        drive.company_name ||
-        (drive.is_mine ? "Your drive" : "Drive"),
+      color: drive.is_anonymous || (!drive.is_mine && drive.title === "Campus drive")
+        ? "#6b7280"
+        : driveColor(drive.id),
+      title: drive.is_mine
+        ? drive.title || "Your drive"
+        : drive.is_anonymous || !drive.company_name
+          ? "Campus drive"
+          : drive.title || drive.company_name || "Drive",
     });
   });
   return map;

@@ -1102,7 +1102,7 @@ export default function CompanyDashboard() {
             <div className="panel-head">
               <h3>Campus calendar</h3>
               <p className="muted">
-                Plan around your drives, other companies, and exam/blocked days
+                Plan around your drives, other campus activity, and exam/blocked days
               </p>
             </div>
             <div className="calendar-layout">
@@ -1133,30 +1133,52 @@ export default function CompanyDashboard() {
                       <article
                         key={drive.id}
                         className="soft-card cal-drive-card"
-                        style={{ "--drive-color": driveColor(drive.id) }}
+                        style={{
+                          "--drive-color": drive.is_mine
+                            ? driveColor(drive.id)
+                            : "#6b7280",
+                        }}
                       >
                         <div className="row-card" style={{ padding: 0, border: "none" }}>
                           <div>
                             <strong>
                               <span
                                 className="cal-drive-swatch"
-                                style={{ background: driveColor(drive.id) }}
+                                style={{
+                                  background: drive.is_mine
+                                    ? driveColor(drive.id)
+                                    : "#6b7280",
+                                }}
                               />
-                              {drive.is_mine ? "Your drive · " : ""}
-                              {drive.title}
+                              {drive.is_mine
+                                ? drive.title || "Your drive"
+                                : "Campus drive"}
                             </strong>
                             <p className="muted">
-                              {drive.is_mine
-                                ? "You"
-                                : drive.company_name || "Another company"}{" "}
-                              · {drive.drive_time ? formatNiceTime(drive.drive_time) : "Time TBA"}{" "}
-                              · {driveStatusLabel(drive.status)}
+                              {drive.is_mine ? (
+                                <>
+                                  Your drive ·{" "}
+                                  {drive.drive_time
+                                    ? formatNiceTime(drive.drive_time)
+                                    : "Time TBA"}{" "}
+                                  · {driveStatusLabel(drive.status)}
+                                </>
+                              ) : (
+                                <>
+                                  Another drive is scheduled
+                                  {drive.drive_time
+                                    ? ` · ${formatNiceTime(drive.drive_time)}`
+                                    : ""}
+                                </>
+                              )}
                             </p>
-                            <p className="muted">
-                              Branches: {drive.eligible_branches || "All"}
-                            </p>
+                            {drive.is_mine ? (
+                              <p className="muted">
+                                Branches: {drive.eligible_branches || "All"}
+                              </p>
+                            ) : null}
                           </div>
-                          <StatusPill status={drive.status} />
+                          {drive.is_mine ? <StatusPill status={drive.status} /> : null}
                         </div>
                       </article>
                     ))}

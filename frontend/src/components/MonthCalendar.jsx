@@ -189,7 +189,7 @@ export default function MonthCalendar({
             <>
               <span className="day-dot inline-dot mine-dot" /> Your drives
               {" · "}
-              <span className="day-dot inline-dot other-dot" /> Other companies
+              <span className="day-dot inline-dot other-dot" /> Other campus drives
               {" · "}
             </>
           )}

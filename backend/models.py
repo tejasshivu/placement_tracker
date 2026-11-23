@@ -133,7 +133,7 @@ class Drive(db.Model):
     company = db.relationship("CompanyProfile", back_populates="drives")
     applications = db.relationship("Application", back_populates="drive", cascade="all, delete-orphan")
 
-    def to_dict(self, include_conflicts=False):
+    def to_dict(self, include_conflicts=False, redact_other_drives=False):
         from rounds import parse_round_details, round_label
 
         round_key = self.current_round or "registration"
@@ -169,7 +169,9 @@ class Drive(db.Model):
         if include_conflicts:
             from scheduling import find_drive_conflicts
 
-            payload["conflicts"] = find_drive_conflicts(self)
+            payload["conflicts"] = find_drive_conflicts(
+                self, redact_others=redact_other_drives
+            )
         return payload
 
 

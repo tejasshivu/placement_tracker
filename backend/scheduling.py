@@ -10,11 +10,12 @@ def _branch_set(value):
     return {b.strip().lower() for b in value.split(",") if b.strip()}
 
 
-def find_drive_conflicts(drive: Drive):
+def find_drive_conflicts(drive: Drive, *, redact_others=False):
     """Return conflict warnings for a drive's current date/time/branches.
 
     Multiple drives on the same day are allowed when times differ.
     Same day + same time + overlapping branches is treated as high severity.
+    When redact_others=True (company viewers), hide other company/drive names.
     """
     conflicts = []
     if not drive.drive_date:
@@ -55,16 +56,24 @@ def find_drive_conflicts(drive: Drive):
         elif my_time:
             time_note = " (no time set)"
 
+        if redact_others:
+            message = (
+                f"{'Same-time clash with another campus drive' if same_slot else 'Another campus drive also on this day'}"
+                f" on {other.drive_date.isoformat()}{time_note}"
+            )
+        else:
+            message = (
+                f"{'Same-time clash with' if same_slot else 'Also on this day:'} "
+                f"'{other.title}' ({other.company.company_name if other.company else 'company'})"
+                f" on {other.drive_date.isoformat()}{time_note}"
+                + (f" for branches: {', '.join(branch_overlap)}" if branch_overlap else "")
+            )
+
         conflicts.append(
             {
                 "type": "drive_clash",
                 "severity": severity,
-                "message": (
-                    f"{'Same-time clash with' if same_slot else 'Also on this day:'} "
-                    f"'{other.title}' ({other.company.company_name if other.company else 'company'})"
-                    f" on {other.drive_date.isoformat()}{time_note}"
-                    + (f" for branches: {', '.join(branch_overlap)}" if branch_overlap else "")
-                ),
+                "message": message,
                 "other_drive_id": other.id,
             }
         )

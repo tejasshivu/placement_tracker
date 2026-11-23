@@ -26,15 +26,41 @@ VALID_STATUSES = {"proposed", "needs_reschedule", "scheduled", "completed", "can
 CALENDAR_STATUSES = {"proposed", "needs_reschedule", "scheduled"}
 
 
+def _anonymous_campus_drive(drive: Drive):
+    """Other companies only learn that a slot is taken — no identity details."""
+    return {
+        "id": drive.id,
+        "drive_date": drive.drive_date.isoformat() if drive.drive_date else None,
+        "drive_time": drive.drive_time,
+        "status": "scheduled",
+        "status_label": "Campus drive",
+        "is_mine": False,
+        "is_anonymous": True,
+        "title": "Campus drive",
+        "company_name": None,
+        "role": None,
+        "eligible_branches": None,
+        "package_lpa": None,
+        "location": None,
+        "description": None,
+        "placement_note": None,
+        "alternate_dates": None,
+        "current_round": None,
+        "current_round_label": None,
+        "round_details": {},
+    }
+
+
 @drives_bp.get("/campus-calendar")
 @jwt_required()
 @role_required("company", "placement")
 def campus_calendar():
-    """Campus drive calendar for planning — company sees own + others' dated drives."""
+    """Campus drive calendar for planning — companies see others only as anonymous slots."""
     claims = get_jwt()
     user = User.query.get(int(get_jwt_identity()))
     my_company_id = None
-    if claims.get("role") == "company" and user and user.company_profile:
+    is_company = claims.get("role") == "company"
+    if is_company and user and user.company_profile:
         my_company_id = user.company_profile.id
 
     rows = (
@@ -49,8 +75,13 @@ def campus_calendar():
 
     drives = []
     for drive in rows:
-        payload = drive.to_dict()
-        payload["is_mine"] = bool(my_company_id and drive.company_id == my_company_id)
+        is_mine = bool(my_company_id and drive.company_id == my_company_id)
+        if is_company and not is_mine:
+            payload = _anonymous_campus_drive(drive)
+        else:
+            payload = drive.to_dict()
+            payload["is_mine"] = is_mine
+            payload["is_anonymous"] = False
         drives.append(payload)
 
     blocked = [
@@ -87,6 +118,7 @@ def list_drives():
     ).all()
     # Companies need conflict hints on their proposals before placement approves
     include_conflicts = role in ("placement", "company")
+    redact_others = role == "company"
 
     # Students only see drives they are eligible for (CGPA + branch),
     # plus any drive they already applied to.
@@ -99,14 +131,25 @@ def list_drives():
         payload = []
         for drive in rows:
             eligible, reasons = drive_eligibility(student, drive)
-            item = drive.to_dict(include_conflicts=include_conflicts)
+            item = drive.to_dict(
+                include_conflicts=include_conflicts,
+                redact_other_drives=redact_others,
+            )
             item["eligible"] = eligible
             item["eligibility_reasons"] = reasons
             if eligible or drive.id in applied_ids:
                 payload.append(item)
         return jsonify(payload)
 
-    return jsonify([d.to_dict(include_conflicts=include_conflicts) for d in rows])
+    return jsonify(
+        [
+            d.to_dict(
+                include_conflicts=include_conflicts,
+                redact_other_drives=redact_others,
+            )
+            for d in rows
+        ]
+    )
 
 
 @drives_bp.get("/<int:drive_id>")
@@ -115,8 +158,14 @@ def get_drive(drive_id):
     verify_jwt_in_request(optional=True)
     claims = get_jwt() or {}
     drive = Drive.query.get_or_404(drive_id)
-    include_conflicts = claims.get("role") in {"placement", "company"}
-    return jsonify(drive.to_dict(include_conflicts=include_conflicts))
+    role = claims.get("role")
+    include_conflicts = role in {"placement", "company"}
+    return jsonify(
+        drive.to_dict(
+            include_conflicts=include_conflicts,
+            redact_other_drives=role == "company",
+        )
+    )
 
 
 @drives_bp.post("")
