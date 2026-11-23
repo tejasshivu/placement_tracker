@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ascendia
+      POSTGRES_USER: ascendia
+      POSTGRES_PASSWORD: ascendia
+    volumes:
+      - ascendia_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ascendia -d ascendia"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ascendia:ascendia@db:5432/ascendia
+      SECRET_KEY: change-me-docker-secret
+      JWT_SECRET_KEY: change-me-docker-jwt-secret
+      FRONTEND_ORIGIN: http://localhost:8080
+      PORT: "5000"
+      WEB_CONCURRENCY: "2"
+    volumes:
+      - ascendia_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: /api
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  ascendia_pg:
+  ascendia_uploads:

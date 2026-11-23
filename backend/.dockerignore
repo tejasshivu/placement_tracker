@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.env
+placement.db
+uploads/
+venv/
+.pytest_cache/
+*.md

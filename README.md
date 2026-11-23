@@ -41,6 +41,26 @@ npm run dev
 
 App: http://127.0.0.1:5173
 
+## Docker (local)
+
+Needs Docker Desktop / Compose.
+
+```powershell
+cd "c:\Users\Yashu\OneDrive\Documents\placement_tracker"
+docker compose up --build
+```
+
+- App: http://localhost:8080  
+- API (direct): http://localhost:5000/api/health  
+- Login: `placement@college.edu` / `placement123`
+
+Postgres data and uploaded files persist in Docker volumes (`ascendia_pg`, `ascendia_uploads`).
+
+```powershell
+docker compose down          # stop
+docker compose down -v       # stop and wipe DB/uploads
+```
+
 ## Deploy (Render API + Vercel frontend)
 
 1. Push this repo to GitHub.
