@@ -1,4 +1,6 @@
-from flask import Blueprint, jsonify, request
+import os
+
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import jwt_required
 from sqlalchemy import case, func
 
@@ -171,6 +173,43 @@ def update_student(student_id):
 
     db.session.commit()
     return jsonify(_student_payload(student))
+
+
+@placement_bp.delete("/students/<int:student_id>")
+@jwt_required()
+@role_required("placement")
+def delete_student(student_id):
+    """Remove a student profile, login, applications, and stored resume/offers."""
+    student = StudentProfile.query.get_or_404(student_id)
+    user = student.user
+    if not user or user.role != "student":
+        return jsonify({"error": "Not a student account"}), 400
+
+    name = student.full_name
+    resume_dir = current_app.config["UPLOAD_FOLDER"]
+    offer_dir = current_app.config["OFFER_UPLOAD_FOLDER"]
+
+    if student.resume_path:
+        resume_file = os.path.join(resume_dir, student.resume_path)
+        if os.path.isfile(resume_file):
+            try:
+                os.remove(resume_file)
+            except OSError:
+                pass
+
+    for app_row in list(student.applications or []):
+        if app_row.offer_letter_path:
+            offer_file = os.path.join(offer_dir, app_row.offer_letter_path)
+            if os.path.isfile(offer_file):
+                try:
+                    os.remove(offer_file)
+                except OSError:
+                    pass
+
+    # Cascades: student_profile + applications
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"message": f"Deleted student {name}", "id": student_id})
 
 
 @placement_bp.get("/reports")

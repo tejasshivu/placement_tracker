@@ -57,6 +57,7 @@ export default function PlacementDashboard() {
   const [editForm, setEditForm] = useState(null);
   const [detailError, setDetailError] = useState("");
   const [savingStudent, setSavingStudent] = useState(false);
+  const [deletingStudent, setDeletingStudent] = useState(false);
   const [resumePreviewUrl, setResumePreviewUrl] = useState(null);
   const [blockedDates, setBlockedDates] = useState([]);
   const [blockForm, setBlockForm] = useState({
@@ -190,6 +191,27 @@ export default function PlacementDashboard() {
     setSelectedStudent(null);
     setEditForm(null);
     setDetailError("");
+  };
+
+  const deleteStudent = async () => {
+    if (!selectedStudent) return;
+    const name = selectedStudent.full_name || "this student";
+    const ok = window.confirm(
+      `Delete ${name}? This removes their login, applications, and resume. This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingStudent(true);
+    setDetailError("");
+    try {
+      await api.delete(`/placement/students/${selectedStudent.id}`);
+      setMessage(`Deleted ${name}`);
+      closeStudent();
+      await load();
+    } catch (err) {
+      setDetailError(err.response?.data?.error || "Could not delete student");
+    } finally {
+      setDeletingStudent(false);
+    }
   };
 
   const saveStudent = async (e) => {
@@ -1489,13 +1511,18 @@ export default function PlacementDashboard() {
               {detailError && <p className="error full">{detailError}</p>}
 
               <div className="cta-row full">
-                <button className="btn primary" type="submit" disabled={savingStudent}>
+                <button
+                  className="btn primary"
+                  type="submit"
+                  disabled={savingStudent || deletingStudent}
+                >
                   {savingStudent ? "Saving…" : "Save changes"}
                 </button>
                 {selectedStudent.has_resume && (
                   <button
                     className="btn ghost"
                     type="button"
+                    disabled={deletingStudent}
                     onClick={() =>
                       downloadPdf(
                         `/students/${selectedStudent.id}/resume`,
@@ -1507,6 +1534,14 @@ export default function PlacementDashboard() {
                     Download resume
                   </button>
                 )}
+                <button
+                  className="btn ghost danger-btn"
+                  type="button"
+                  disabled={deletingStudent || savingStudent}
+                  onClick={deleteStudent}
+                >
+                  {deletingStudent ? "Deleting…" : "Delete student"}
+                </button>
               </div>
             </form>
           </div>

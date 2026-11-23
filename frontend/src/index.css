@@ -243,6 +243,16 @@ a {
   background: #fff;
 }
 
+.btn.danger-btn {
+  border-color: rgba(180, 50, 50, 0.35);
+  color: #9b1c1c;
+}
+
+.btn.danger-btn:hover {
+  background: rgba(180, 50, 50, 0.08);
+  border-color: rgba(180, 50, 50, 0.5);
+}
+
 .btn.ghost:hover {
   background: rgba(255, 255, 255, 0.75);
 }
