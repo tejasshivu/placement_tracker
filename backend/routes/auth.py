@@ -17,15 +17,20 @@ def register_student():
     if not all(data.get(k) for k in required):
         return jsonify({"error": "email, password, and full_name are required"}), 400
 
-    if User.query.filter_by(email=data["email"].lower().strip()).first():
+    from utils import ensure_college_email, normalize_branch, parse_cgpa, parse_phone
+
+    try:
+        email = ensure_college_email(data["email"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email already registered"}), 409
 
-    user = User(email=data["email"].lower().strip(), role="student", is_approved=True)
+    user = User(email=email, role="student", is_approved=True)
     user.set_password(data["password"])
     db.session.add(user)
     db.session.flush()
-
-    from utils import normalize_branch, parse_cgpa, parse_phone
 
     try:
         cgpa = parse_cgpa(data.get("cgpa"))

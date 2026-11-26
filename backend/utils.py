@@ -75,6 +75,34 @@ def parse_phone(value, *, field_name="Phone", allow_none=True):
     return text
 
 
+def college_email_domains():
+    """Allowed student email domains from env (comma-separated)."""
+    from flask import current_app, has_app_context
+    import os
+
+    raw = ""
+    if has_app_context():
+        raw = current_app.config.get("COLLEGE_EMAIL_DOMAINS") or ""
+    if not raw:
+        raw = os.getenv("COLLEGE_EMAIL_DOMAINS", "college.edu")
+    return [d.strip().lower() for d in str(raw).split(",") if d.strip()]
+
+
+def ensure_college_email(email):
+    """Require a college email domain for students. Raises ValueError if invalid."""
+    text = (email or "").strip().lower()
+    if "@" not in text:
+        raise ValueError("Use your college email address")
+    domain = text.rsplit("@", 1)[-1]
+    allowed = college_email_domains()
+    if domain not in allowed:
+        if len(allowed) == 1:
+            raise ValueError(f"Students must register with a @{allowed[0]} email")
+        listed = ", ".join(f"@{d}" for d in allowed)
+        raise ValueError(f"Students must register with a college email ({listed})")
+    return text
+
+
 def role_required(*roles):
     def decorator(fn):
         @wraps(fn)

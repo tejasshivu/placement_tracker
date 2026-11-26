@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import api from "../api";
 import { COURSES, SEMESTERS } from "../constants/courses";
 import { cgpaKeyDown, parseCgpa, sanitizeCgpaInput } from "../utils/cgpa";
+import { collegeEmailHint, parseCollegeEmail } from "../utils/collegeEmail";
 import { parsePhone, phoneKeyDown, sanitizePhoneInput } from "../utils/phone";
 
 export default function RegisterStudent() {
@@ -43,9 +44,15 @@ export default function RegisterStudent() {
       setError(phone.error);
       return;
     }
+    const collegeEmail = parseCollegeEmail(form.email);
+    if (!collegeEmail.ok) {
+      setError(collegeEmail.error);
+      return;
+    }
     try {
       await api.post("/auth/register/student", {
         ...form,
+        email: collegeEmail.email,
         semester: form.semester ? Number(form.semester) : null,
         cgpa: parsed.value,
         phone: phone.value,
@@ -73,8 +80,15 @@ export default function RegisterStudent() {
             <input value={form.full_name} onChange={update("full_name")} required />
           </label>
           <label>
-            Email
-            <input value={form.email} onChange={update("email")} type="email" required />
+            College email
+            <input
+              value={form.email}
+              onChange={update("email")}
+              type="email"
+              placeholder="name@college.edu"
+              required
+            />
+            <span className="muted field-hint">{collegeEmailHint()}</span>
           </label>
           <label>
             Password

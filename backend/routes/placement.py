@@ -165,7 +165,12 @@ def update_student(student_id):
         return jsonify({"error": str(exc)}), 400
 
     if "email" in data and data["email"]:
-        new_email = data["email"].lower().strip()
+        from utils import ensure_college_email
+
+        try:
+            new_email = ensure_college_email(data["email"])
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         existing = User.query.filter(User.email == new_email, User.id != student.user_id).first()
         if existing:
             return jsonify({"error": "Email already in use"}), 409

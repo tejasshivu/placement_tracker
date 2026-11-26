@@ -33,3 +33,8 @@ class Config:
 
     # Comma-separated frontend origins for CORS (e.g. https://ascendia.vercel.app)
     FRONTEND_ORIGIN = (os.getenv("FRONTEND_ORIGIN") or "*").strip() or "*"
+
+    # Student registration allowed email domains (comma-separated), e.g. college.edu
+    COLLEGE_EMAIL_DOMAINS = (
+        os.getenv("COLLEGE_EMAIL_DOMAINS") or "college.edu"
+    ).strip() or "college.edu"

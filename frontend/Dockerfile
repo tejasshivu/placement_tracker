@@ -10,7 +10,9 @@ COPY . .
 
 # Browser calls same origin; nginx proxies /api → Flask
 ARG VITE_API_URL=/api
+ARG VITE_COLLEGE_EMAIL_DOMAINS=college.edu
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_COLLEGE_EMAIL_DOMAINS=$VITE_COLLEGE_EMAIL_DOMAINS
 
 RUN npm run build
 
