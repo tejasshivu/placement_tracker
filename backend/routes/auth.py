@@ -137,34 +137,47 @@ def me():
 @auth_bp.post("/forgot-password")
 def forgot_password():
     """
-    Beginner-friendly reset flow (no real email yet).
-    In production you would email the reset link instead of returning the token.
+    Reset password with email + new_password (demo / campus portal without SMTP).
+    Works the same on Docker, Render, and local — as long as the account exists there.
     """
+    from flask import current_app
+
     data = request.get_json() or {}
     email = (data.get("email") or "").lower().strip()
+    new_password = data.get("new_password") or data.get("password") or ""
+
     if not email:
         return jsonify({"error": "email is required"}), 400
 
     user = User.query.filter_by(email=email).first()
-
-    # Same response shape whether or not the email exists (avoid account enumeration)
-    generic = {
-        "message": "If that email exists, a reset link is ready. Use it within 30 minutes.",
-    }
-
     if not user:
-        return jsonify(generic)
+        return jsonify({"error": "No account found for that email"}), 404
 
+    # Preferred path: set the new password immediately
+    if new_password:
+        if not current_app.config.get("ALLOW_DIRECT_PASSWORD_RESET", True):
+            return jsonify({"error": "Direct password reset is disabled"}), 403
+        if len(new_password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters"}), 400
+        user.set_password(new_password)
+        user.reset_token = None
+        user.reset_token_expires = None
+        db.session.commit()
+        return jsonify({"message": "Password updated. You can log in now."})
+
+    # Fallback: token link (still available if someone only sends email)
     token = secrets.token_urlsafe(32)
     user.reset_token = token
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(minutes=30)
     db.session.commit()
-
-    # Dev/learning mode: return token so UI can show a reset link without email SMTP
-    generic["dev_reset_token"] = token
-    generic["dev_reset_path"] = f"/reset-password?token={token}"
-    print(f"[password-reset] {email} -> {generic['dev_reset_path']}")
-    return jsonify(generic)
+    path = f"/reset-password?token={token}"
+    return jsonify(
+        {
+            "message": "Reset link ready. Use it within 30 minutes.",
+            "dev_reset_token": token,
+            "dev_reset_path": path,
+        }
+    )
 
 
 @auth_bp.post("/reset-password")

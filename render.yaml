@@ -23,5 +23,7 @@ services:
         value: "*"
       - key: COLLEGE_EMAIL_DOMAINS
         value: college.edu
+      - key: ALLOW_DIRECT_PASSWORD_RESET
+        value: "1"
       - key: PYTHON_VERSION
         value: "3.12.8"

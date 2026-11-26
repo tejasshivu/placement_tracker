@@ -38,3 +38,9 @@ class Config:
     COLLEGE_EMAIL_DOMAINS = (
         os.getenv("COLLEGE_EMAIL_DOMAINS") or "college.edu"
     ).strip() or "college.edu"
+
+    # Demo-friendly: reset password with email + new password (no SMTP). Set 0 in hard prod.
+    ALLOW_DIRECT_PASSWORD_RESET = (
+        os.getenv("ALLOW_DIRECT_PASSWORD_RESET", "1").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
